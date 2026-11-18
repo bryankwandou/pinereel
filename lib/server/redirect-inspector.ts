@@ -49,7 +49,7 @@ export async function inspectAndUnwrapUrl(rawInput: string): Promise<SafetyRepor
   const parsedInitial = new URL(initial.sanitizedUrl);
   const chain: string[] = [initial.sanitizedUrl];
 
-  // Unwrap shorteners or suspicious redirectors without executing HTML/JS.
+  // Unwrap shorteners or ad wrappers without executing HTML/JS.
   const shouldUnwrap =
     isShortenerHost(parsedInitial.hostname) ||
     initial.sourceType === 'other';

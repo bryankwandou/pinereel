@@ -8,23 +8,23 @@ import { sanitizeAndInspectUrl } from '@/lib/shared/safety';
 const TEST_PAYLOADS = [
   {
     id: 'trackers',
-    label: 'YouTube + Trackers',
+    label: 'YouTube + Ad Trackers',
     url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ&utm_source=social&fbclid=ad123&si=track99',
   },
   {
-    id: 'gambling',
-    label: 'Gambling APK Lure',
-    url: 'https://bit.ly/slot-gacor-maxwin-verify-wallet.apk',
+    id: 'adunwrap',
+    label: 'Ad Wrapper -> Video',
+    url: 'https://ads.doubleclick.net/clk?adurl=https://www.youtube.com/watch?v=aqz-KE-bpKQ',
   },
   {
-    id: 'spoof',
-    label: 'Spoofed Domain + Creds',
-    url: 'https://user:pass@youtube.com.login-verify.example/watch?v=123',
+    id: 'generalnews',
+    label: 'General Video (No False Block)',
+    url: 'youtube.com/watch?v=aqz-KE-bpKQ&slot=1&city=bandar',
   },
   {
-    id: 'ssrf',
-    label: 'Private Metadata SSRF',
-    url: 'http://169.254.169.254/latest/meta-data/iam',
+    id: 'malware',
+    label: 'Standalone Ad Malware (.apk)',
+    url: 'https://ads.doubleclick.net/slot-gacor-bonus.apk',
   },
 ];
 

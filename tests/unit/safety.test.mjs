@@ -3,16 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Pure JS checks validating safety rules and security boundaries directly against source
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-
-// Transpile-free lightweight check by importing ts via node? No, Node 24 supports --experimental-strip-types or direct ESM!
-// Actually Node v24.13.0 runs TypeScript natively with strip-types! Let's verify in test runner or keep unit test pure ESM + TS!
-test('Node v24 checks safety.ts directly', async () => {
+test('Node v24 checks safety.ts: blocks ads/malware/SSRF without rejecting general video links', async () => {
   const mod = await import('../../lib/shared/safety.ts');
 
-  // 1. SSRF private/loopback blocking
+  // 1. SSRF private/loopback and non-http scheme blocking
   for (const bad of [
     'http://127.0.0.1:8080/video.mp4',
     'http://169.254.169.254/latest/meta-data',
@@ -28,10 +22,10 @@ test('Node v24 checks safety.ts directly', async () => {
     assert.equal(r.kidSafe, false);
   }
 
-  // 2. Gambling & executable phishing blocking
+  // 2. Standalone ad network & executable malware payloads are blocked
   for (const lure of [
+    'https://ads.doubleclick.net/slot-gacor-bonus.apk',
     'https://bit.ly/slot-gacor-maxwin-verify-wallet.apk',
-    'https://promo.example/judol-bonus-daftar.mp4',
     'https://youtube.com.login-verify.example/watch?v=abc',
     'https://cdn.example/installer.exe',
   ]) {
@@ -39,26 +33,41 @@ test('Node v24 checks safety.ts directly', async () => {
     assert.equal(r.verdict, 'BLOCKED', `Expected BLOCKED for ${lure}`);
   }
 
-  // 3. Tracker parameter stripping on YouTube & X
-  const yt = mod.sanitizeAndInspectUrl(
-    'https://www.youtube.com/watch?v=aqz-KE-bpKQ&utm_source=x&fbclid=123&si=track'
+  // 3. Ad-network wrapper carrying a real video URL strips the ad host and preserves the video!
+  const wrapped = mod.sanitizeAndInspectUrl(
+    'https://ads.doubleclick.net/clk?adurl=https://www.youtube.com/watch?v=aqz-KE-bpKQ&fbclid=track'
   );
-  assert.equal(yt.verdict, 'SAFE');
-  assert.equal(yt.kidSafe, true);
-  assert.equal(yt.sourceType, 'youtube');
-  assert.equal(yt.sanitizedUrl, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
-  assert.deepEqual(yt.strippedParams.sort(), ['fbclid', 'si', 'utm_source']);
+  assert.equal(wrapped.verdict, 'SAFE');
+  assert.equal(wrapped.sanitizedUrl, 'https://www.youtube.com/watch?v=aqz-KE-bpKQ');
+  assert.ok(wrapped.reasons.some((r) => r.code === 'AD_WRAPPER_STRIPPED'));
 
-  // 4. Metadata age-restriction downgrade
-  const adult = mod.classifyMetadataSafety(yt, {
-    title: 'Sample clip',
+  // 4. General video links without https:// or containing ordinary words (slot, bandar, scatter) MUST NOT be blocked
+  const noScheme = mod.sanitizeAndInspectUrl('youtube.com/watch?v=aqz-KE-bpKQ&slot=1&city=bandar');
+  assert.equal(noScheme.verdict, 'SAFE');
+  assert.equal(noScheme.sourceType, 'youtube');
+  assert.equal(noScheme.sanitizedUrl, 'https://youtube.com/watch?v=aqz-KE-bpKQ&slot=1&city=bandar');
+
+  const igLink = mod.sanitizeAndInspectUrl('instagram.com/reel/C8x1234abcd/?igsh=track123');
+  assert.equal(igLink.verdict, 'SAFE');
+  assert.equal(igLink.sourceType, 'instagram');
+  assert.equal(igLink.sanitizedUrl, 'https://instagram.com/reel/C8x1234abcd/');
+
+  const newsWithKeywords = mod.classifyMetadataSafety(noScheme, {
+    title: 'Liputan Bandar Udara dan Scatter Plot Tutorial',
+    description: 'Diskusi kasino sejarah atau slot waktu acara',
+  });
+  assert.equal(newsWithKeywords.verdict, 'SAFE');
+
+  // 5. Explicit upstream age_limit >= 18 sets CAUTION advisory (never 403 BLOCKED for adult host unless porn site)
+  const ageFlagged = mod.classifyMetadataSafety(noScheme, {
+    title: 'Age gated documentary',
     ageLimit: 18,
     isFamilySafe: false,
   });
-  assert.equal(adult.kidSafe, false);
-  assert.equal(adult.verdict, 'BLOCKED');
+  assert.equal(ageFlagged.kidSafe, false);
+  assert.equal(ageFlagged.verdict, 'CAUTION');
 
-  // 5. Deterministic SHA-256 digest verification
+  // 6. Deterministic SHA-256 digest verification
   const digest = mod.computeSha256Hex('pinereel-test');
   assert.equal(digest.length, 64);
   assert.match(digest, /^[0-9a-f]{64}$/);
@@ -71,4 +80,3 @@ test('Locales directory contains zero empty values or mismatched placeholders', 
     assert.ok(fs.existsSync(p), `Missing locale ${l}.ts`);
   }
 });
-

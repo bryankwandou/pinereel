@@ -4,7 +4,7 @@ export interface CuratedSample {
   sourceLabel: string;
   url: string;
   description: string;
-  expectedKind: 'direct' | 'youtube' | 'x' | 'blocked';
+  expectedKind: 'direct' | 'youtube' | 'x' | 'tiktok' | 'blocked';
 }
 
 export const CURATED_SAMPLES: CuratedSample[] = [
@@ -33,11 +33,19 @@ export const CURATED_SAMPLES: CuratedSample[] = [
     expectedKind: 'direct',
   },
   {
+    id: 'tiktok-sample',
+    label: 'Short Video (TikTok No-Watermark)',
+    sourceLabel: 'TikTok',
+    url: 'https://www.tiktok.com/@scout2015/video/6718335390845095173',
+    description: 'Extracts clean no-watermark TikTok MP4 stream without page trackers.',
+    expectedKind: 'tiktok',
+  },
+  {
     id: 'blocked-lure',
-    label: 'Blocked Threat Link (Test Shield)',
-    sourceLabel: 'Threat Sim',
-    url: 'https://bit.ly/slot-gacor-maxwin-verify-wallet.apk',
-    description: 'Demonstrates instant pre-flight blocking of gambling ads and executable phishing lures.',
+    label: 'Blocked Ad Malware (.apk)',
+    sourceLabel: 'Ad Shield',
+    url: 'https://ads.doubleclick.net/slot-gacor-bonus.apk',
+    description: 'Demonstrates blocking standalone ad networks and executable malware lures.',
     expectedKind: 'blocked',
   },
 ];

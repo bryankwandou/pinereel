@@ -10,7 +10,7 @@ test.describe('PineReel Core E2E', () => {
     await ctx.close();
   });
 
-  test('resolves YouTube URL cleanly, strips trackers, and blocks gambling APK lure', async ({ request }) => {
+  test('allows general video links across platforms while blocking ads and malware lures', async ({ request }) => {
     const safeRes = await request.post('/api/resolve', {
       data: {
         url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ&utm_source=test&fbclid=stripme',
@@ -23,9 +23,46 @@ test.describe('PineReel Core E2E', () => {
     expect(safeBody.safety.sanitizedUrl).toBe('https://www.youtube.com/watch?v=aqz-KE-bpKQ');
     expect(safeBody.safety.strippedParams).toContain('fbclid');
 
+    // General video URL without https:// and containing common query terms must NOT be rejected
+    const noSchemeRes = await request.post('/api/resolve', {
+      data: { url: 'youtube.com/watch?v=aqz-KE-bpKQ&slot=1' },
+    });
+    expect(noSchemeRes.status()).toBe(200);
+    const noSchemeBody = await noSchemeRes.json();
+    expect(noSchemeBody.ok).toBe(true);
+    expect(noSchemeBody.safety.verdict).toBe('SAFE');
+
+    // Ad wrapper around video URL strips ad server and keeps clean video
+    const adWrapRes = await request.post('/api/resolve', {
+      data: { url: 'https://ads.doubleclick.net/clk?adurl=https://www.youtube.com/watch?v=aqz-KE-bpKQ' },
+    });
+    expect(adWrapRes.status()).toBe(200);
+    const adWrapBody = await adWrapRes.json();
+    expect(adWrapBody.ok).toBe(true);
+    expect(adWrapBody.safety.verdict).toBe('SAFE');
+
+    // TikTok direct MP4 extraction
+    const ttRes = await request.post('/api/resolve', {
+      data: { url: 'https://www.tiktok.com/@scout2015/video/6718335390845095173' },
+    });
+    expect(ttRes.status()).toBe(200);
+    const ttBody = await ttRes.json();
+    expect(ttBody.ok).toBe(true);
+    expect(ttBody.safety.verdict).toBe('SAFE');
+
+    // Instagram Reel resolution
+    const igRes = await request.post('/api/resolve', {
+      data: { url: 'https://www.instagram.com/reel/C8x1234abcd/?igsh=track' },
+    });
+    expect(igRes.status()).toBe(200);
+    const igBody = await igRes.json();
+    expect(igBody.ok).toBe(true);
+    expect(igBody.safety.verdict).toBe('SAFE');
+
+    // Standalone ad malware APK remains blocked
     const badRes = await request.post('/api/resolve', {
       data: {
-        url: 'https://bit.ly/slot-gacor-maxwin-verify-wallet.apk',
+        url: 'https://ads.doubleclick.net/slot-gacor-bonus.apk',
       },
     });
     expect(badRes.status()).toBe(403);

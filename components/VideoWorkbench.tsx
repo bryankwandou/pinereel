@@ -308,7 +308,7 @@ export function VideoWorkbench({
                 <input
                   id="video-url-input"
                   name="url"
-                  type="url"
+                  type="text"
                   inputMode="url"
                   autoComplete="off"
                   spellCheck={false}

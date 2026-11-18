@@ -4,6 +4,8 @@ export type SourcePlatform =
   | 'instagram'
   | 'tiktok'
   | 'vimeo'
+  | 'dailymotion'
+  | 'streamable'
   | 'archive'
   | 'direct'
   | 'other';
@@ -34,6 +36,8 @@ const TRACKER_PARAM_SET = new Set([
   'fbclid',
   'gclid',
   'dclid',
+  'gbraid',
+  'wbraid',
   'msclkid',
   'yclid',
   'twclid',
@@ -52,55 +56,58 @@ const TRACKER_PARAM_SET = new Set([
   'ref',
   'trk',
   'share_id',
+  'clickid',
+  'ad_id',
+  'adset_id',
+  'campaign_id',
 ]);
 
-const GAMBLING_KEYWORDS = [
-  'judol',
-  'judi',
-  'slot88',
-  'gacor',
-  'maxwin',
-  'togel',
-  'sbobet',
-  'casino',
-  'roulette',
-  'jackpot',
-  'poker88',
-  'pragmaticplay',
-  'zeus88',
-  'rtp-live',
-  'deposit-pulsa',
-  'daftar-slot',
-  'betting',
-  'sportsbook',
-  'bandar',
-  'scatter',
+// Dedicated ad/click-tracker hosts whose wrapper query parameters can be stripped
+// to extract the underlying clean video destination.
+const AD_TRACKER_HOSTS = [
+  'doubleclick.net',
+  'googlesyndication.com',
+  'googleadservices.com',
+  'adservice.google.com',
+  'popads.net',
+  'popcash.net',
+  'propellerads.com',
+  'exoclick.com',
+  'adsterra.com',
+  'juicyads.com',
+  'taboola.com',
+  'outbrain.com',
+  'adnxs.com',
+  'trafficjunky.net',
+  'clickadu.com',
 ];
 
-const PHISHING_KEYWORDS = [
+const AD_UNWRAP_PARAMS = ['adurl', 'url', 'u', 'dest', 'destination', 'target', 'redirect', 'q'];
+
+const PHISHING_LURE_HOSTS_OR_TOKENS = [
   'seed-phrase',
   'recovery-phrase',
-  'claim-airdrop',
   'verify-wallet',
-  'account-suspended',
-  'login-verify',
-  'update-billing',
-  'free-robux',
   'wallet-sync',
   'connect-claim',
+  'login-verify',
+  'account-suspended',
+  'slot-gacor',
+  'judol',
+  'togel-online',
+  'sbobet',
+  'pragmaticplay',
 ];
 
-const ADULT_KEYWORDS = [
-  'nsfw',
-  'pornhub',
-  'xvideos',
-  'xnxx',
-  'onlyfans',
-  'chaturbate',
-  'redtube',
-  'youporn',
-  'xhamster',
-  'hentai',
+const EXPLICIT_ADULT_HOSTS = [
+  'pornhub.com',
+  'xvideos.com',
+  'xnxx.com',
+  'onlyfans.com',
+  'chaturbate.com',
+  'redtube.com',
+  'youporn.com',
+  'xhamster.com',
 ];
 
 const EXECUTABLE_EXT_RE = /\.(exe|msi|apk|bat|cmd|scr|ps1|vbs|hta|dmg|pkg|deb|rpm|jar)(\?|#|$)/i;
@@ -117,7 +124,20 @@ const SHORTENER_HOSTS = new Set([
   'cutt.ly',
   'rb.gy',
   'shorturl.at',
+  'vm.tiktok.com',
+  'vt.tiktok.com',
+  'dai.ly',
+  'fb.watch',
 ]);
+
+export function normalizeUserUrlInput(rawInput: string): string {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return '';
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
 
 export function isPrivateOrReservedHost(hostname: string): boolean {
   const h = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
@@ -132,7 +152,6 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
     return true;
   }
 
-  // IPv4 literal check
   const ipv4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4) {
     const octets = ipv4.slice(1).map(Number);
@@ -147,16 +166,13 @@ export function isPrivateOrReservedHost(hostname: string): boolean {
     return false;
   }
 
-  // Integer / octal / hex IP representations
   if (/^(0x[0-9a-f]+|\d+)$/i.test(h)) return true;
 
-  // IPv6 loopback, link-local, unique-local, mapped IPv4
   if (h.includes(':')) {
     if (h === '::' || h === '::1') return true;
     if (/^(fc|fd|fe8|fe9|fea|feb)/i.test(h)) return true;
     if (h.startsWith('::ffff:')) {
-      const mapped = h.slice(7);
-      return isPrivateOrReservedHost(mapped);
+      return isPrivateOrReservedHost(h.slice(7));
     }
   }
 
@@ -188,6 +204,12 @@ export function detectSourcePlatform(parsed: URL): SourcePlatform {
   if (host === 'vimeo.com' || host === 'player.vimeo.com') {
     return 'vimeo';
   }
+  if (host === 'dailymotion.com' || host === 'dai.ly') {
+    return 'dailymotion';
+  }
+  if (host === 'streamable.com') {
+    return 'streamable';
+  }
   if (host === 'archive.org' || host.endsWith('.archive.org')) {
     return 'archive';
   }
@@ -202,15 +224,25 @@ export function isShortenerHost(hostname: string): boolean {
   return SHORTENER_HOSTS.has(h);
 }
 
+function isAdNetworkHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^www\./, '');
+  return AD_TRACKER_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
+}
+
+function isExplicitAdultHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^www\./, '');
+  return EXPLICIT_ADULT_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
+}
+
 export function sanitizeAndInspectUrl(
   rawInput: string,
   redirectChain: string[] = []
 ): SafetyReport {
-  const trimmed = rawInput.trim();
+  const normalized = normalizeUserUrlInput(rawInput);
   const reasons: SafetyReason[] = [];
   let score = 100;
 
-  if (!trimmed) {
+  if (!normalized) {
     return {
       verdict: 'BLOCKED',
       score: 0,
@@ -228,7 +260,7 @@ export function sanitizeAndInspectUrl(
 
   let parsed: URL;
   try {
-    parsed = new URL(trimmed);
+    parsed = new URL(normalized);
   } catch {
     return {
       verdict: 'BLOCKED',
@@ -240,7 +272,7 @@ export function sanitizeAndInspectUrl(
       sourceType: 'other',
       strippedParams: [],
       redirectChain,
-      reasons: [{ code: 'MALFORMED_URL', severity: 'block', detail: 'URL syntax is invalid or missing protocol.' }],
+      reasons: [{ code: 'MALFORMED_URL', severity: 'block', detail: 'URL syntax is invalid.' }],
       fingerprint: computeSha256Hex(`MALFORMED:${rawInput}`),
     };
   }
@@ -267,12 +299,59 @@ export function sanitizeAndInspectUrl(
     };
   }
 
+  // If the link is wrapped inside an ad-tracker domain (e.g. doubleclick.net?adurl=https://youtube.com/...),
+  // strip the ad wrapper and recover the clean target video URL rather than rejecting the video!
+  if (isAdNetworkHost(parsed.hostname)) {
+    let extractedTarget: string | null = null;
+    for (const p of AD_UNWRAP_PARAMS) {
+      const candidate = parsed.searchParams.get(p);
+      if (candidate && /^https?:\/\//i.test(candidate)) {
+        extractedTarget = candidate;
+        break;
+      }
+    }
+    if (extractedTarget && !redirectChain.includes(extractedTarget)) {
+      const unwrapped = sanitizeAndInspectUrl(extractedTarget, [...redirectChain, parsed.href]);
+      return {
+        ...unwrapped,
+        originalUrl: rawInput,
+        reasons: [
+          {
+            code: 'AD_WRAPPER_STRIPPED',
+            severity: 'pass',
+            detail: `Bypassed ad redirect host "${parsed.hostname}" and extracted the clean video link.`,
+          },
+          ...unwrapped.reasons,
+        ],
+      };
+    }
+    return {
+      verdict: 'BLOCKED',
+      score: 0,
+      kidSafe: false,
+      originalUrl: rawInput,
+      sanitizedUrl: '',
+      hostname: parsed.hostname,
+      sourceType: 'other',
+      strippedParams: [],
+      redirectChain,
+      reasons: [
+        {
+          code: 'AD_NETWORK_ONLY',
+          severity: 'block',
+          detail: `Blocked standalone ad/tracker host "${parsed.hostname}" with no clean video target.`,
+        },
+      ],
+      fingerprint: computeSha256Hex(`ADHOST:${parsed.href}`),
+    };
+  }
+
   if (parsed.username || parsed.password) {
     score -= 60;
     reasons.push({
       code: 'EMBEDDED_CREDENTIALS',
       severity: 'block',
-      detail: 'URL contains embedded userinfo credentials, a common phishing spoofing pattern.',
+      detail: 'URL contains embedded userinfo credentials, a phishing spoofing pattern.',
     });
   }
 
@@ -298,7 +377,7 @@ export function sanitizeAndInspectUrl(
     };
   }
 
-  // Strip tracking parameters
+  // Strip ad & tracking parameters cleanly while preserving video parameters (v, list, t, etc.)
   const strippedParams: string[] = [];
   const nextParams = new URLSearchParams();
   parsed.searchParams.forEach((value, key) => {
@@ -316,92 +395,80 @@ export function sanitizeAndInspectUrl(
 
   if (strippedParams.length > 0) {
     reasons.push({
-      code: 'TRACKERS_STRIPPED',
+      code: 'ADS_TRACKERS_STRIPPED',
       severity: 'pass',
-      detail: `Stripped ${strippedParams.length} tracking parameter(s): ${strippedParams.join(', ')}.`,
+      detail: `Stripped ${strippedParams.length} ad/tracking parameter(s): ${strippedParams.join(', ')}.`,
     });
   } else {
     reasons.push({
       code: 'SCHEME_VERIFIED',
       severity: 'pass',
-      detail: 'Public web protocol and host verified outside private network boundaries.',
+      detail: 'Public web protocol verified; third-party ad scripts are excluded from playback.',
     });
   }
 
   const lowerFull = sanitizedUrl.toLowerCase();
   const hostLower = parsed.hostname.toLowerCase();
 
-  // Punycode homoglyph alert
   if (hostLower.includes('xn--')) {
-    score -= 35;
+    score -= 25;
     reasons.push({
       code: 'PUNYCODE_IDN',
       severity: 'warn',
-      detail: 'Internationalized punycode domain detected; verify domain spelling before viewing.',
+      detail: 'Internationalized punycode domain detected; verify domain spelling.',
     });
   }
 
-  // Executable lure check
+  // Block executable malware binaries rather than video streams
   if (EXECUTABLE_EXT_RE.test(lowerFull)) {
     score -= 90;
     reasons.push({
       code: 'EXECUTABLE_PAYLOAD',
       severity: 'block',
-      detail: 'Direct link targets an executable or installer binary rather than a media stream.',
+      detail: 'Link points to an executable/installer binary rather than a video stream.',
     });
   }
 
-  // Gambling ad / redirect lure check
-  const gamblingHit = GAMBLING_KEYWORDS.find((kw) => lowerFull.includes(kw));
-  if (gamblingHit) {
-    score -= 90;
-    reasons.push({
-      code: 'GAMBLING_AD_PATTERN',
-      severity: 'block',
-      detail: `Blocked gambling promotion or redirect pattern matching "${gamblingHit}".`,
-    });
+  // Block dedicated phishing/gambling-ad lure slugs & explicit adult hosts only (never block general video platforms)
+  const sourceType = detectSourcePlatform(parsed);
+  const isKnownVideoPlatform = sourceType !== 'other' && sourceType !== 'direct';
+
+  if (!isKnownVideoPlatform) {
+    const lureHit = PHISHING_LURE_HOSTS_OR_TOKENS.find((kw) => lowerFull.includes(kw));
+    if (lureHit) {
+      score -= 85;
+      reasons.push({
+        code: 'AD_LURE_BLOCKED',
+        severity: 'block',
+        detail: `Blocked gambling-ad or phishing lure pattern matching "${lureHit}".`,
+      });
+    }
   }
 
-  // Phishing check
-  const phishingHit = PHISHING_KEYWORDS.find((kw) => lowerFull.includes(kw));
-  if (phishingHit) {
-    score -= 85;
-    reasons.push({
-      code: 'PHISHING_PATTERN',
-      severity: 'block',
-      detail: `Blocked phishing or credential harvest signature matching "${phishingHit}".`,
-    });
-  }
-
-  // Adult content domain check
-  const adultHit = ADULT_KEYWORDS.find((kw) => lowerFull.includes(kw));
-  if (adultHit) {
+  if (isExplicitAdultHost(hostLower)) {
     score -= 80;
     reasons.push({
       code: 'ADULT_DOMAIN',
       severity: 'block',
-      detail: 'Blocked explicit adult source incompatible with Kid-Safe viewing.',
+      detail: 'Blocked explicit adult host incompatible with Kid-Safe viewing.',
     });
   }
 
-  // Brand spoofing subdomain heuristic (e.g. youtube.com.randomsite.tld)
-  if (
-    /(youtube\.com|instagram\.com|twitter\.com|x\.com)\.[^/]+/i.test(hostLower)
-  ) {
+  if (/(youtube\.com|instagram\.com|twitter\.com|x\.com)\.[^/]+/i.test(hostLower)) {
     score -= 80;
     reasons.push({
       code: 'DOMAIN_SPOOFING',
       severity: 'block',
-      detail: 'Subdomain impersonates a major video platform on an unrelated root domain.',
+      detail: 'Subdomain impersonates a video platform on an unrelated root domain.',
     });
   }
 
   if (parsed.protocol === 'http:') {
-    score -= 15;
+    score -= 10;
     reasons.push({
       code: 'INSECURE_HTTP',
       severity: 'warn',
-      detail: 'Unencrypted HTTP link; stream integrity cannot rely on TLS transport.',
+      detail: 'Unencrypted HTTP link; media loads cleanly via server proxy.',
     });
   }
 
@@ -417,15 +484,15 @@ export function sanitizeAndInspectUrl(
   const hasBlock = reasons.some((r) => r.severity === 'block');
   const hasWarn = reasons.some((r) => r.severity === 'warn');
 
-  const verdict: SafetyVerdict = hasBlock || clampedScore < 50 ? 'BLOCKED' : hasWarn || clampedScore < 80 ? 'CAUTION' : 'SAFE';
+  const verdict: SafetyVerdict =
+    hasBlock || clampedScore < 50 ? 'BLOCKED' : hasWarn || clampedScore < 80 ? 'CAUTION' : 'SAFE';
   const kidSafe = verdict === 'SAFE';
-  const sourceType = detectSourcePlatform(parsed);
 
   if (!hasBlock && !hasWarn) {
     reasons.push({
-      code: 'CLEAN_DESTINATION',
+      code: 'AD_FREE_ISOLATED',
       severity: 'pass',
-      detail: 'Zero gambling redirects, phishing indicators, or executable lures detected.',
+      detail: 'Video link approved for isolated ad-free playback without external ad overlays.',
     });
   }
 
@@ -446,6 +513,8 @@ export function sanitizeAndInspectUrl(
   };
 }
 
+// Metadata screening adjusts Kid-Safe advisory status ONLY for explicit upstream age limits (>= 18)
+// or explicit non-family-safe flags; it NEVER blocks normal public videos on keywords.
 export function classifyMetadataSafety(
   report: SafetyReport,
   meta: {
@@ -461,50 +530,23 @@ export function classifyMetadataSafety(
   let score = report.score;
   let kidSafe = report.kidSafe;
 
-  const corpus = [meta.title, meta.description, ...(meta.tags ?? [])]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-
   if (meta.ageLimit !== undefined && meta.ageLimit >= 18) {
-    score = Math.min(score, 40);
+    score = Math.min(score, 65);
     kidSafe = false;
     reasons.push({
       code: 'AGE_RESTRICTED',
-      severity: 'block',
-      detail: `Upstream age limit (${meta.ageLimit}+) disqualifies Kid-Safe playback.`,
+      severity: 'warn',
+      detail: `Origin age limit (${meta.ageLimit}+) requires Guardian PIN in Kid-Safe Mode.`,
     });
   }
 
   if (meta.isFamilySafe === false || meta.possiblySensitive === true) {
-    score = Math.min(score, 55);
+    score = Math.min(score, 70);
     kidSafe = false;
     reasons.push({
       code: 'SENSITIVE_FLAG',
       severity: 'warn',
-      detail: 'Source flagged this media as non-family-safe or sensitive.',
-    });
-  }
-
-  const gamblingTextHit = GAMBLING_KEYWORDS.find((kw) => corpus.includes(kw));
-  if (gamblingTextHit) {
-    score = Math.min(score, 20);
-    kidSafe = false;
-    reasons.push({
-      code: 'GAMBLING_METADATA',
-      severity: 'block',
-      detail: `Metadata contains gambling ad promotion term "${gamblingTextHit}".`,
-    });
-  }
-
-  const adultTextHit = ADULT_KEYWORDS.find((kw) => corpus.includes(kw));
-  if (adultTextHit) {
-    score = Math.min(score, 20);
-    kidSafe = false;
-    reasons.push({
-      code: 'ADULT_METADATA',
-      severity: 'block',
-      detail: 'Metadata indicates explicit adult material.',
+      detail: 'Origin flagged this video as sensitive or non-family-safe.',
     });
   }
 

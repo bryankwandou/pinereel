@@ -63,10 +63,11 @@ function buildDownloadUrl(
   ext: string,
   sourcePageUrl?: string
 ): string {
-  const safeBase = title
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64) || 'pinereel-video';
+  const safeBase =
+    title
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'pinereel-video';
   const params = new URLSearchParams({
     url: directUrl,
     filename: `${safeBase}.${ext || 'mp4'}`,
@@ -92,7 +93,11 @@ export function extractYouTubeId(rawUrl: string): string | null {
       const v = u.searchParams.get('v');
       if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
       const parts = u.pathname.split('/').filter(Boolean);
-      if (['shorts', 'embed', 'live', 'v'].includes(parts[0]) && parts[1] && /^[a-zA-Z0-9_-]{11}$/.test(parts[1])) {
+      if (
+        ['shorts', 'embed', 'live', 'v'].includes(parts[0]) &&
+        parts[1] &&
+        /^[a-zA-Z0-9_-]{11}$/.test(parts[1])
+      ) {
         return parts[1];
       }
     }
@@ -113,11 +118,58 @@ export function extractTweetInfo(rawUrl: string): { user?: string; id: string } 
   }
 }
 
+export function extractInstagramShortcode(rawUrl: string): { kind: 'p' | 'reel' | 'tv'; code: string } | null {
+  try {
+    const u = new URL(rawUrl);
+    const m = u.pathname.match(/^\/(p|reel|reels|tv)\/([a-zA-Z0-9_-]+)/i);
+    if (!m) return null;
+    const rawKind = m[1].toLowerCase();
+    const kind = rawKind === 'reels' ? 'reel' : (rawKind as 'p' | 'reel' | 'tv');
+    return { kind, code: m[2] };
+  } catch {
+    return null;
+  }
+}
+
+export function extractTikTokId(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    const m = u.pathname.match(/\/video\/(\d+)/i);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 export function extractVimeoId(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
     const m = u.pathname.match(/\/(?:video\/)?(\d+)/);
     return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+export function extractDailymotionId(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    if (u.hostname.toLowerCase().includes('dai.ly')) {
+      const part = u.pathname.split('/').filter(Boolean)[0];
+      return part || null;
+    }
+    const m = u.pathname.match(/\/video\/([a-zA-Z0-9]+)/i);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+export function extractStreamableId(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    const part = u.pathname.split('/').filter(Boolean)[0];
+    return part || null;
   } catch {
     return null;
   }
@@ -153,7 +205,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 6500): Promise<T
   }
 }
 
-async function fetchTextBounded(url: string, maxBytes = 600_000, timeoutMs = 7000): Promise<string | null> {
+async function fetchTextBounded(url: string, maxBytes = 650_000, timeoutMs = 7000): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -254,24 +306,6 @@ async function resolveWithLocalYtdlp(
       tags: info.tags,
     });
 
-    if (updatedSafety.verdict === 'BLOCKED') {
-      return {
-        ok: false,
-        engine: 'blocked',
-        safety: updatedSafety,
-        title,
-        author,
-        durationSeconds: info.duration ?? null,
-        thumbnailUrl: info.thumbnail ?? null,
-        streams: [],
-        preferredStreamUrl: null,
-        privacyEmbedUrl: null,
-        offlineCapable: false,
-        offlineNote: 'Blocked by safety policy after metadata inspection.',
-        ytdlpAvailable: true,
-      };
-    }
-
     const formats = Array.isArray(info.formats) ? info.formats : [];
     const muxedMp4 = formats
       .filter(
@@ -318,7 +352,6 @@ async function resolveWithLocalYtdlp(
       };
     });
 
-    // If yt-dlp only exposed adaptive audio/video separately on YouTube, offer a local yt-dlp merged stream!
     if (variants.length === 0 && info.url && /^https?:/i.test(info.url)) {
       variants.push({
         id: 'ytdlp-direct',
@@ -474,17 +507,17 @@ async function resolveArchiveOrg(url: string, safety: SafetyReport): Promise<Res
   const preferred = variants[0];
 
   return {
-    ok: updatedSafety.verdict !== 'BLOCKED',
-    engine: updatedSafety.verdict === 'BLOCKED' ? 'blocked' : 'cloud-extractor',
+    ok: true,
+    engine: 'cloud-extractor',
     safety: updatedSafety,
     title,
     author,
     durationSeconds: mp4Files[0]?.length ? Math.round(Number(mp4Files[0].length)) : null,
     thumbnailUrl: thumbUrl,
-    streams: updatedSafety.verdict === 'BLOCKED' ? [] : variants,
-    preferredStreamUrl: updatedSafety.verdict === 'BLOCKED' ? null : preferred.proxyUrl,
+    streams: variants,
+    preferredStreamUrl: preferred.proxyUrl,
     privacyEmbedUrl: null,
-    offlineCapable: updatedSafety.verdict !== 'BLOCKED',
+    offlineCapable: true,
     offlineNote: 'Public Archive direct MP4 resolved; ready for Mountain Vault offline storage.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
@@ -561,7 +594,7 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
           }
         }
       } catch {
-        // Metadata regex parse fallback safely continues with oEmbed + privacy embed.
+        // Fallback to oEmbed + privacy embed
       }
     }
   }
@@ -572,24 +605,6 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
     isFamilySafe,
     tags: keywords,
   });
-
-  if (updatedSafety.verdict === 'BLOCKED') {
-    return {
-      ok: false,
-      engine: 'blocked',
-      safety: updatedSafety,
-      title,
-      author,
-      durationSeconds,
-      thumbnailUrl,
-      streams: [],
-      preferredStreamUrl: null,
-      privacyEmbedUrl: null,
-      offlineCapable: false,
-      offlineNote: 'Blocked by Kid-Safe and Threat Shield policy.',
-      ytdlpAvailable: await isYtdlpAvailable(),
-    };
-  }
 
   const preferred = variants[0] ?? null;
   const ytdlpAvail = await isYtdlpAvailable();
@@ -609,7 +624,7 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
     offlineNote:
       variants.length > 0
         ? 'Direct ad-free YouTube stream resolved for offline Mountain Vault caching.'
-        : 'Privacy-isolated youtube-nocookie playback active in cloud mode. Run PineReel locally with yt-dlp or paste direct Archive/X/MP4 URLs for offline file storage.',
+        : 'Privacy-isolated youtube-nocookie playback active in cloud mode. Run PineReel locally with yt-dlp for direct MP4 offline vault downloads.',
     ytdlpAvailable: ytdlpAvail,
   };
 }
@@ -644,29 +659,30 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
     if (m.video_info?.duration_millis) {
       durationSeconds = Math.round(m.video_info.duration_millis / 1000);
     }
-    const mp4s = (m.video_info?.variants ?? [])
-      .filter((v) => v.url && v.content_type === 'video/mp4')
+    const rawVariants = (m.video_info?.variants ?? [])
+      .filter((v) => v.url && (v.content_type === 'video/mp4' || v.content_type === 'application/x-mpegURL'))
       .sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0));
-    mp4s.forEach((v, idx) => {
-      const kbps = v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : 'Stream';
+    rawVariants.forEach((v, idx) => {
+      const isHls = v.content_type === 'application/x-mpegURL' || /\.m3u8/i.test(v.url!);
+      const ext = isHls ? 'm3u8' : 'mp4';
+      const kbps = v.bitrate ? `${Math.round(v.bitrate / 1000)}kbps` : isHls ? 'HLS' : 'Stream';
       variants.push({
-        id: `x-mp4-${idx}`,
-        label: `MP4 (${kbps})`,
-        ext: 'mp4',
+        id: `x-var-${idx}`,
+        label: `${ext.toUpperCase()} (${kbps})`,
+        ext,
         url: v.url!,
         proxyUrl: buildProxyUrl(v.url!),
-        downloadUrl: buildDownloadUrl(v.url!, title, 'mp4', url),
+        downloadUrl: buildDownloadUrl(v.url!, title, ext, url),
         qualityHeight: null,
         hasAudio: true,
         hasVideo: true,
         filesizeBytes: null,
-        mimeType: 'video/mp4',
-        isHls: false,
+        mimeType: v.content_type || 'video/mp4',
+        isHls,
       });
     });
   }
 
-  // Secondary public fxtwitter JSON fallback if syndication returned empty
   if (variants.length === 0) {
     const fx = await fetchJsonWithTimeout<{
       tweet?: {
@@ -715,25 +731,7 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
     possiblySensitive: sensitive,
   });
 
-  if (updatedSafety.verdict === 'BLOCKED') {
-    return {
-      ok: false,
-      engine: 'blocked',
-      safety: updatedSafety,
-      title,
-      author,
-      durationSeconds,
-      thumbnailUrl: thumb,
-      streams: [],
-      preferredStreamUrl: null,
-      privacyEmbedUrl: null,
-      offlineCapable: false,
-      offlineNote: 'Blocked by Kid-Safe and Threat Shield policy.',
-      ytdlpAvailable: await isYtdlpAvailable(),
-    };
-  }
-
-  const preferred = variants[0] ?? null;
+  const preferred = variants.find((v) => !v.isHls) ?? variants[0] ?? null;
 
   return {
     ok: true,
@@ -746,11 +744,273 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
     streams: variants,
     preferredStreamUrl: preferred ? preferred.proxyUrl : null,
     privacyEmbedUrl: null,
+    offlineCapable: variants.some((v) => !v.isHls),
+    offlineNote:
+      variants.length > 0
+        ? 'Direct X video stream resolved without login or ads; ready for Mountain Vault offline storage.'
+        : 'Status resolved, though no public video attachment was reported by X.',
+    ytdlpAvailable: await isYtdlpAvailable(),
+  };
+}
+
+async function resolveTikTokCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
+  const [tikwm, oembed] = await Promise.all([
+    fetchJsonWithTimeout<{
+      code?: number;
+      data?: {
+        id?: string;
+        title?: string;
+        duration?: number;
+        cover?: string;
+        play?: string;
+        hdplay?: string;
+        size?: number;
+        author?: { nickname?: string; unique_id?: string };
+      };
+    }>(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`),
+    fetchJsonWithTimeout<{ title?: string; author_name?: string; thumbnail_url?: string }>(
+      `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`
+    ),
+  ]);
+
+  const title = tikwm?.data?.title || oembed?.title || 'TikTok Video';
+  const author = tikwm?.data?.author?.nickname || oembed?.author_name || 'TikTok Creator';
+  const thumb = tikwm?.data?.cover || oembed?.thumbnail_url || null;
+  const durationSeconds = tikwm?.data?.duration ?? null;
+  const variants: MediaStreamVariant[] = [];
+
+  if (tikwm?.data?.hdplay && /^https?:/i.test(tikwm.data.hdplay)) {
+    variants.push({
+      id: 'tiktok-hd',
+      label: 'HD MP4 (No Watermark)',
+      ext: 'mp4',
+      url: tikwm.data.hdplay,
+      proxyUrl: buildProxyUrl(tikwm.data.hdplay),
+      downloadUrl: buildDownloadUrl(tikwm.data.hdplay, title, 'mp4', url),
+      qualityHeight: 1080,
+      hasAudio: true,
+      hasVideo: true,
+      filesizeBytes: tikwm.data.size ?? null,
+      mimeType: 'video/mp4',
+      isHls: false,
+    });
+  }
+  if (tikwm?.data?.play && /^https?:/i.test(tikwm.data.play)) {
+    variants.push({
+      id: 'tiktok-sd',
+      label: 'MP4 Stream',
+      ext: 'mp4',
+      url: tikwm.data.play,
+      proxyUrl: buildProxyUrl(tikwm.data.play),
+      downloadUrl: buildDownloadUrl(tikwm.data.play, title, 'mp4', url),
+      qualityHeight: 720,
+      hasAudio: true,
+      hasVideo: true,
+      filesizeBytes: tikwm.data.size ?? null,
+      mimeType: 'video/mp4',
+      isHls: false,
+    });
+  }
+
+  const ttId = tikwm?.data?.id || extractTikTokId(url);
+  if (variants.length === 0 && !ttId && !oembed) return null;
+
+  const updatedSafety = classifyMetadataSafety(safety, { title });
+  const preferred = variants[0] ?? null;
+
+  return {
+    ok: true,
+    engine: 'cloud-extractor',
+    safety: updatedSafety,
+    title,
+    author,
+    durationSeconds,
+    thumbnailUrl: thumb,
+    streams: variants,
+    preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+    privacyEmbedUrl: ttId ? `https://www.tiktok.com/embed/v2/${ttId}` : null,
     offlineCapable: variants.length > 0,
     offlineNote:
       variants.length > 0
-        ? 'Direct X MP4 stream resolved without login or ads; ready for Mountain Vault offline storage.'
-        : 'Post resolved, but no public video stream was attached to this status.',
+        ? 'Ad-free TikTok MP4 resolved for direct playback and offline Mountain Vault.'
+        : 'TikTok isolated player active.',
+    ytdlpAvailable: await isYtdlpAvailable(),
+  };
+}
+
+async function resolveInstagramCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
+  const ig = extractInstagramShortcode(url);
+  if (!ig) return null;
+
+  const embedPath = `https://www.instagram.com/${ig.kind}/${ig.code}/embed/`;
+  const embedHtml = await fetchTextBounded(`${embedPath}captioned/`);
+
+  const variants: MediaStreamVariant[] = [];
+  let title = `Instagram ${ig.kind === 'reel' ? 'Reel' : 'Video'} (${ig.code})`;
+  let thumb: string | null = null;
+
+  if (embedHtml) {
+    const vidMatch =
+      embedHtml.match(/"video_url"\s*:\s*"([^"]+)"/) ||
+      embedHtml.match(/<video[^>]+src=["']([^"']+)["']/i);
+    if (vidMatch?.[1]) {
+      const cleanVid = vidMatch[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+      if (/^https?:/i.test(cleanVid)) {
+        variants.push({
+          id: 'ig-mp4',
+          label: 'Direct MP4',
+          ext: 'mp4',
+          url: cleanVid,
+          proxyUrl: buildProxyUrl(cleanVid),
+          downloadUrl: buildDownloadUrl(cleanVid, title, 'mp4', url),
+          qualityHeight: null,
+          hasAudio: true,
+          hasVideo: true,
+          filesizeBytes: null,
+          mimeType: 'video/mp4',
+          isHls: false,
+        });
+      }
+    }
+    const imgMatch = embedHtml.match(/class="EmbeddedMediaImage"[^>]+src="([^"]+)"/i);
+    if (imgMatch?.[1]) thumb = decodeHtmlEntities(imgMatch[1]);
+    const capMatch = embedHtml.match(/class="Caption"[^>]*>([\s\S]{1,120}?)</i);
+    if (capMatch?.[1]?.trim()) title = capMatch[1].trim();
+  }
+
+  const updatedSafety = classifyMetadataSafety(safety, { title });
+  const preferred = variants[0] ?? null;
+
+  return {
+    ok: true,
+    engine: 'cloud-extractor',
+    safety: updatedSafety,
+    title,
+    author: 'Instagram',
+    durationSeconds: null,
+    thumbnailUrl: thumb,
+    streams: variants,
+    preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+    privacyEmbedUrl: embedPath,
+    offlineCapable: variants.length > 0 || (await isYtdlpAvailable()),
+    offlineNote:
+      variants.length > 0
+        ? 'Direct Instagram MP4 extracted without trackers; ready for offline Mountain Vault.'
+        : 'Isolated Instagram embed active without ad popups. Run local yt-dlp runtime for direct MP4 download.',
+    ytdlpAvailable: await isYtdlpAvailable(),
+  };
+}
+
+async function resolveDailymotionCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
+  const id = extractDailymotionId(url);
+  if (!id) return null;
+
+  const meta = await fetchJsonWithTimeout<{
+    title?: string;
+    duration?: number;
+    owner?: { screenname?: string };
+    posters?: Record<string, string>;
+    qualities?: Record<string, { type?: string; url?: string }[]>;
+  }>(`https://www.dailymotion.com/player/metadata/video/${encodeURIComponent(id)}`);
+
+  const title = meta?.title || `Dailymotion Video (${id})`;
+  const author = meta?.owner?.screenname || 'Dailymotion';
+  const thumb = meta?.posters?.['720'] || meta?.posters?.['480'] || null;
+  const variants: MediaStreamVariant[] = [];
+
+  for (const [qKey, entries] of Object.entries(meta?.qualities ?? {})) {
+    for (const entry of entries ?? []) {
+      if (entry.url && /^https?:/i.test(entry.url)) {
+        const isHls = entry.type?.includes('mpegURL') || /\.m3u8/i.test(entry.url);
+        const ext = isHls ? 'm3u8' : 'mp4';
+        variants.push({
+          id: `dm-${qKey}`,
+          label: `${qKey.toUpperCase()} ${ext.toUpperCase()}`,
+          ext,
+          url: entry.url,
+          proxyUrl: buildProxyUrl(entry.url),
+          downloadUrl: buildDownloadUrl(entry.url, title, ext, url),
+          qualityHeight: /^\d+$/.test(qKey) ? Number(qKey) : null,
+          hasAudio: true,
+          hasVideo: true,
+          filesizeBytes: null,
+          mimeType: isHls ? 'application/vnd.apple.mpegurl' : 'video/mp4',
+          isHls,
+        });
+      }
+    }
+  }
+
+  const updatedSafety = classifyMetadataSafety(safety, { title });
+  const preferred = variants.find((v) => !v.isHls) ?? variants[0] ?? null;
+
+  return {
+    ok: true,
+    engine: 'cloud-extractor',
+    safety: updatedSafety,
+    title,
+    author,
+    durationSeconds: meta?.duration ?? null,
+    thumbnailUrl: thumb,
+    streams: variants,
+    preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+    privacyEmbedUrl: `https://www.dailymotion.com/embed/video/${id}?ui-start-screen-info=false`,
+    offlineCapable: variants.some((v) => !v.isHls),
+    offlineNote: 'Ad-free Dailymotion stream resolved without video pre-roll ads.',
+    ytdlpAvailable: await isYtdlpAvailable(),
+  };
+}
+
+async function resolveStreamableCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
+  const id = extractStreamableId(url);
+  if (!id) return null;
+  const meta = await fetchJsonWithTimeout<{
+    title?: string;
+    thumbnail_url?: string;
+    files?: Record<string, { url?: string; size?: number; duration?: number; height?: number }>;
+  }>(`https://api.streamable.com/videos/${encodeURIComponent(id)}`);
+
+  if (!meta?.files) return null;
+  const title = meta.title || `Streamable (${id})`;
+  const variants: MediaStreamVariant[] = [];
+  let durationSeconds: number | null = null;
+
+  for (const [k, f] of Object.entries(meta.files)) {
+    if (f.url && /^https?:/i.test(f.url)) {
+      if (f.duration && !durationSeconds) durationSeconds = Math.round(f.duration);
+      variants.push({
+        id: `st-${k}`,
+        label: f.height ? `${f.height}p MP4` : `${k.toUpperCase()} MP4`,
+        ext: 'mp4',
+        url: f.url,
+        proxyUrl: buildProxyUrl(f.url),
+        downloadUrl: buildDownloadUrl(f.url, title, 'mp4', url),
+        qualityHeight: f.height ?? null,
+        hasAudio: true,
+        hasVideo: true,
+        filesizeBytes: f.size ?? null,
+        mimeType: 'video/mp4',
+        isHls: false,
+      });
+    }
+  }
+
+  if (variants.length === 0) return null;
+  const updatedSafety = classifyMetadataSafety(safety, { title });
+
+  return {
+    ok: true,
+    engine: 'cloud-extractor',
+    safety: updatedSafety,
+    title,
+    author: 'Streamable',
+    durationSeconds,
+    thumbnailUrl: meta.thumbnail_url ? (meta.thumbnail_url.startsWith('//') ? `https:${meta.thumbnail_url}` : meta.thumbnail_url) : null,
+    streams: variants,
+    preferredStreamUrl: variants[0].proxyUrl,
+    privacyEmbedUrl: null,
+    offlineCapable: true,
+    offlineNote: 'Direct Streamable MP4 resolved for ad-free playback and Mountain Vault offline cache.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
 }
@@ -765,24 +1025,20 @@ async function resolveVimeoCloud(url: string, safety: SafetyReport): Promise<Res
     thumbnail_url?: string;
   }>(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`);
 
-  if (!oembed) return null;
-  const title = oembed.title || `Vimeo Video (${id})`;
+  const title = oembed?.title || `Vimeo Video (${id})`;
   const updatedSafety = classifyMetadataSafety(safety, { title });
 
   return {
-    ok: updatedSafety.verdict !== 'BLOCKED',
-    engine: updatedSafety.verdict === 'BLOCKED' ? 'blocked' : 'cloud-extractor',
+    ok: true,
+    engine: 'cloud-extractor',
     safety: updatedSafety,
     title,
-    author: oembed.author_name || 'Vimeo Creator',
-    durationSeconds: oembed.duration ?? null,
-    thumbnailUrl: oembed.thumbnail_url ?? null,
+    author: oembed?.author_name || 'Vimeo Creator',
+    durationSeconds: oembed?.duration ?? null,
+    thumbnailUrl: oembed?.thumbnail_url ?? null,
     streams: [],
     preferredStreamUrl: null,
-    privacyEmbedUrl:
-      updatedSafety.verdict === 'BLOCKED'
-        ? null
-        : `https://player.vimeo.com/video/${id}?dnt=1&title=0&byline=0&portrait=0`,
+    privacyEmbedUrl: `https://player.vimeo.com/video/${id}?dnt=1&title=0&byline=0&portrait=0`,
     offlineCapable: await isYtdlpAvailable(),
     offlineNote: 'DNT-isolated Vimeo playback active; run local yt-dlp engine for direct MP4 downloads.',
     ytdlpAvailable: await isYtdlpAvailable(),
@@ -807,7 +1063,7 @@ function extractMetaTag(html: string, nameOrProp: string): string | null {
   return m ? decodeHtmlEntities(m[1] || m[2] || '') : null;
 }
 
-async function resolveOpenGraphMedia(
+async function resolveAnyWebVideoPage(
   url: string,
   safety: SafetyReport,
   _platform: SourcePlatform
@@ -821,11 +1077,26 @@ async function resolveOpenGraphMedia(
   const html = await fetchTextBounded(url);
   if (!html) return null;
 
-  const videoUrl =
+  const candidateUrls: string[] = [];
+  const metaVid =
     extractMetaTag(html, 'og:video:secure_url') ||
     extractMetaTag(html, 'og:video:url') ||
     extractMetaTag(html, 'og:video') ||
     extractMetaTag(html, 'twitter:player:stream');
+  if (metaVid) candidateUrls.push(metaVid);
+
+  for (const tagMatch of html.matchAll(/<(?:video|source)[^>]+src=["']([^"']+)["']/gi)) {
+    if (tagMatch[1]) candidateUrls.push(decodeHtmlEntities(tagMatch[1]));
+  }
+
+  for (const jsonLdMatch of html.matchAll(/"contentUrl"\s*:\s*"([^"]+)"/gi)) {
+    if (jsonLdMatch[1]) candidateUrls.push(jsonLdMatch[1].replace(/\\\//g, '/'));
+  }
+
+  for (const rawMediaMatch of html.matchAll(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm|m3u8)(?:\?[^\s"'<>\\]*)?/gi)) {
+    candidateUrls.push(rawMediaMatch[0]);
+    if (candidateUrls.length >= 6) break;
+  }
 
   const title =
     extractMetaTag(html, 'og:title') ||
@@ -837,42 +1108,57 @@ async function resolveOpenGraphMedia(
   const thumb = extractMetaTag(html, 'og:image') || extractMetaTag(html, 'twitter:image') || null;
   const updatedSafety = classifyMetadataSafety(safety, { title, description });
 
-  if (updatedSafety.verdict === 'BLOCKED') {
-    return {
-      ok: false,
-      engine: 'blocked',
-      safety: updatedSafety,
-      title,
-      author: safety.hostname,
-      durationSeconds: null,
-      thumbnailUrl: thumb,
-      streams: [],
-      preferredStreamUrl: null,
-      privacyEmbedUrl: null,
-      offlineCapable: false,
-      offlineNote: 'Blocked by Threat Shield after HTML metadata analysis.',
-      ytdlpAvailable: await isYtdlpAvailable(),
-    };
+  const seen = new Set<string>();
+  const variants: MediaStreamVariant[] = [];
+
+  for (const rawCandidate of candidateUrls) {
+    let resolved: string;
+    try {
+      resolved = new URL(rawCandidate, url).toString();
+    } catch {
+      continue;
+    }
+    if (!/^https?:/i.test(resolved) || seen.has(resolved)) continue;
+    seen.add(resolved);
+
+    const isHls = /\.m3u8(\?|#|$)/i.test(resolved);
+    const isDirectStream = isHls || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(resolved);
+    if (!isDirectStream && rawCandidate !== metaVid) continue;
+
+    const ext = isHls ? 'm3u8' : resolved.match(/\.(webm|m4v|mov)/i)?.[1]?.toLowerCase() ?? 'mp4';
+    variants.push({
+      id: `web-${variants.length}`,
+      label: isHls ? 'HLS Stream' : `Direct ${ext.toUpperCase()}`,
+      ext,
+      url: resolved,
+      proxyUrl: buildProxyUrl(resolved),
+      downloadUrl: buildDownloadUrl(resolved, title, ext, url),
+      qualityHeight: null,
+      hasAudio: true,
+      hasVideo: true,
+      filesizeBytes: null,
+      mimeType: isHls ? 'application/vnd.apple.mpegurl' : `video/${ext}`,
+      isHls,
+    });
   }
 
-  if (!videoUrl || !/^https?:/i.test(videoUrl)) return null;
+  // Detect clean embedded video iframes on general web pages (stripping page ads!)
+  let embedFallback: string | null = null;
+  if (variants.length === 0) {
+    const ytEmbed = html.match(/https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{11})/);
+    if (ytEmbed?.[1]) {
+      embedFallback = `https://www.youtube-nocookie.com/embed/${ytEmbed[1]}?rel=0&modestbranding=1`;
+    } else {
+      const vmEmbed = html.match(/https:\/\/player\.vimeo\.com\/video\/(\d+)/);
+      if (vmEmbed?.[1]) {
+        embedFallback = `https://player.vimeo.com/video/${vmEmbed[1]}?dnt=1`;
+      }
+    }
+  }
 
-  const isHls = /\.m3u8(\?|#|$)/i.test(videoUrl);
-  const ext = isHls ? 'm3u8' : 'mp4';
-  const variant: MediaStreamVariant = {
-    id: 'og-stream',
-    label: isHls ? 'HLS Stream' : 'Direct MP4',
-    ext,
-    url: videoUrl,
-    proxyUrl: buildProxyUrl(videoUrl),
-    downloadUrl: buildDownloadUrl(videoUrl, title, ext, url),
-    qualityHeight: null,
-    hasAudio: true,
-    hasVideo: true,
-    filesizeBytes: null,
-    mimeType: isHls ? 'application/vnd.apple.mpegurl' : 'video/mp4',
-    isHls,
-  };
+  if (variants.length === 0 && !embedFallback) return null;
+
+  const preferred = variants.find((v) => !v.isHls) ?? variants[0] ?? null;
 
   return {
     ok: true,
@@ -882,13 +1168,14 @@ async function resolveOpenGraphMedia(
     author: safety.hostname,
     durationSeconds: null,
     thumbnailUrl: thumb,
-    streams: [variant],
-    preferredStreamUrl: variant.proxyUrl,
-    privacyEmbedUrl: null,
-    offlineCapable: !isHls,
-    offlineNote: isHls
-      ? 'Clean HLS stream extracted without page ad scripts.'
-      : 'Direct MP4 stream extracted without page scripts; ready for Mountain Vault offline storage.',
+    streams: variants,
+    preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+    privacyEmbedUrl: embedFallback,
+    offlineCapable: variants.some((v) => !v.isHls),
+    offlineNote:
+      variants.length > 0
+        ? 'Direct video stream extracted with page ads stripped; ready for offline Mountain Vault.'
+        : 'Extracted embedded video cleanly without surrounding page ads.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
 }
@@ -901,7 +1188,7 @@ export async function resolveVideoSource(rawUrl: string): Promise<ResolvedMedia>
       ok: false,
       engine: 'blocked',
       safety,
-      title: 'Blocked Destination',
+      title: 'Blocked Threat or Ad Host',
       author: safety.hostname || 'Untrusted Host',
       durationSeconds: null,
       thumbnailUrl: null,
@@ -909,26 +1196,23 @@ export async function resolveVideoSource(rawUrl: string): Promise<ResolvedMedia>
       preferredStreamUrl: null,
       privacyEmbedUrl: null,
       offlineCapable: false,
-      offlineNote: 'Blocked before any remote media stream was requested.',
+      offlineNote: 'Blocked malware/ad host or unsafe network scheme before loading.',
       ytdlpAvailable: await isYtdlpAvailable(),
     };
   }
 
   const cleanUrl = safety.sanitizedUrl;
 
-  // 1. Direct video file / HLS stream check
   if (safety.sourceType === 'direct') {
     const direct = await resolveDirectMedia(cleanUrl, safety);
     if (direct) return direct;
   }
 
-  // 2. Local yt-dlp engine (1,000+ platforms including YouTube, X, Instagram, TikTok, Vimeo)
   if (await isYtdlpAvailable()) {
     const ytdlpResult = await resolveWithLocalYtdlp(cleanUrl, safety);
     if (ytdlpResult) return ytdlpResult;
   }
 
-  // 3. Optional remote companion yt-dlp worker (for cloud deployments)
   const workerUrl = process.env.PINEREEL_YTDLP_WORKER_URL;
   if (workerUrl) {
     try {
@@ -951,7 +1235,6 @@ export async function resolveVideoSource(rawUrl: string): Promise<ResolvedMedia>
     }
   }
 
-  // 4. Built-in serverless pure-TS extractors
   if (safety.sourceType === 'archive') {
     const arch = await resolveArchiveOrg(cleanUrl, safety);
     if (arch) return arch;
@@ -964,33 +1247,52 @@ export async function resolveVideoSource(rawUrl: string): Promise<ResolvedMedia>
     const tw = await resolveXCloud(cleanUrl, safety);
     if (tw) return tw;
   }
+  if (safety.sourceType === 'tiktok') {
+    const tt = await resolveTikTokCloud(cleanUrl, safety);
+    if (tt) return tt;
+  }
+  if (safety.sourceType === 'instagram') {
+    const ig = await resolveInstagramCloud(cleanUrl, safety);
+    if (ig) return ig;
+  }
+  if (safety.sourceType === 'dailymotion') {
+    const dm = await resolveDailymotionCloud(cleanUrl, safety);
+    if (dm) return dm;
+  }
+  if (safety.sourceType === 'streamable') {
+    const st = await resolveStreamableCloud(cleanUrl, safety);
+    if (st) return st;
+  }
   if (safety.sourceType === 'vimeo') {
     const vm = await resolveVimeoCloud(cleanUrl, safety);
     if (vm) return vm;
   }
 
-  // 5. Fallback: check direct content-type or OpenGraph video tags (e.g. Instagram / independent hosts)
   const directProbe = await resolveDirectMedia(cleanUrl, safety);
   if (directProbe) return directProbe;
 
-  const ogProbe = await resolveOpenGraphMedia(cleanUrl, safety, safety.sourceType);
-  if (ogProbe) return ogProbe;
+  const webProbe = await resolveAnyWebVideoPage(cleanUrl, safety, safety.sourceType);
+  if (webProbe) return webProbe;
+
+  // Last clean metadata fallback via noembed so general links still identify cleanly
+  const noembed = await fetchJsonWithTimeout<{ title?: string; author_name?: string; thumbnail_url?: string }>(
+    `https://noembed.com/embed?url=${encodeURIComponent(cleanUrl)}`
+  );
 
   return {
     ok: false,
     engine: 'cloud-extractor',
     safety,
-    title: 'No Public Stream Detected',
-    author: safety.hostname,
+    title: noembed?.title || 'Origin Requires Local yt-dlp or Direct Stream',
+    author: noembed?.author_name || safety.hostname,
     durationSeconds: null,
-    thumbnailUrl: null,
+    thumbnailUrl: noembed?.thumbnail_url || null,
     streams: [],
     preferredStreamUrl: null,
     privacyEmbedUrl: null,
     offlineCapable: false,
     offlineNote:
-      'This URL passed safety screening, but the origin requires authentication or a local yt-dlp runtime to extract a playable video stream.',
+      'Link passed ad and safety inspection cleanly, but this host restricts cloud extraction without login or local yt-dlp.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
 }
-
