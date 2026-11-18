@@ -1,0 +1,55 @@
+{
+  "name": "pinereel",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "prebuild": "node scripts/check-locales.mjs",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "check:locales": "node scripts/check-locales.mjs",
+    "test:unit": "node --test tests/unit/*.test.mjs",
+    "audit:design": "node scripts/design-audit.mjs",
+    "test:e2e": "playwright test",
+    "record:walkthrough": "node scripts/record-walkthrough.mjs"
+  },
+  "dependencies": {
+    "@react-three/drei": "9.114.3",
+    "@react-three/fiber": "8.17.10",
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-phantom": "^0.9.29",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/wallet-adapter-react-ui": "^0.9.39",
+    "@solana/wallet-adapter-solflare": "^0.6.33",
+    "@solana/web3.js": "^1.95.8",
+    "bs58": "^6.0.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.15.0",
+    "hls.js": "^1.5.18",
+    "lucide-react": "^0.460.0",
+    "next": "14.2.35",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "three": "^0.164.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^20.17.10",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
+    "@types/three": "^0.164.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "14.2.35",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25"
+  }
+}
+

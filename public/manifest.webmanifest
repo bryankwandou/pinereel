@@ -1,0 +1,17 @@
+{
+  "name": "PineReel",
+  "short_name": "PineReel",
+  "description": "Ad-free, kid-safe video inspector, offline mountain vault, and Solana Devnet safety attestation viewer.",
+  "start_url": "/vault",
+  "display": "standalone",
+  "background_color": "#FAF8F4",
+  "theme_color": "#0E5A3E",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
+
