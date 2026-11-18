@@ -33,6 +33,11 @@ export function SiteHeader() {
   const [langOpen, setLangOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [navOverflow, setNavOverflow] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const langWrapRef = useRef<HTMLDivElement>(null);
   const langBtnRef = useRef<HTMLButtonElement>(null);
@@ -110,7 +115,7 @@ export function SiteHeader() {
   };
 
   return (
-    <header className="pr-header">
+    <header className="pr-header" data-hydrated={hydrated ? 'true' : undefined}>
       <div className="pr-wrap pr-header-inner">
         <div className="flex items-center gap-3 min-w-0">
           <Link

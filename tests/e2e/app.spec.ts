@@ -71,11 +71,14 @@ test.describe('PineReel Core E2E', () => {
   });
 
   test('caches direct MP4 into Offline Mountain Vault and switches languages cleanly', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.goto('/', { waitUntil: 'load' });
     await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator('header[data-hydrated="true"]')).toBeVisible();
 
     // Verify language switcher sits above hero content and updates <html lang>
-    await page.getByRole('button', { name: /Language/i }).click();
+    const langBtn = page.getByRole('button', { name: /Language/i });
+    await langBtn.click();
+    await expect(langBtn).toHaveAttribute('aria-expanded', 'true');
     const jaItem = page.getByRole('radio', { name: /日本語/ });
     const box = await jaItem.boundingBox();
     expect(box).not.toBeNull();
