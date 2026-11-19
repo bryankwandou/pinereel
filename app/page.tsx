@@ -3,7 +3,13 @@
 import Link from 'next/link';
 import { ArrowRight, HardDrive, Shield, Terminal } from 'lucide-react';
 import { useApp } from '@/components/AppProvider';
-import { KineticLine, Magnetic, useSafeReducedMotion } from '@/components/MotionKit';
+import {
+  CountUpMetric,
+  KineticLine,
+  Magnetic,
+  ScrollRise,
+  useSafeReducedMotion,
+} from '@/components/MotionKit';
 import { MountainSimulator } from '@/components/MountainSimulator';
 import { ShieldStack } from '@/components/ShieldStack';
 import { SourceMarquee } from '@/components/SourceMarquee';
@@ -14,7 +20,7 @@ import { VideoWorkbench } from '@/components/VideoWorkbench';
 const SOURCE_MATRIX = [
   {
     platform: 'Direct MP4 / WebM / HLS',
-    cloud: 'Native stream + proxy',
+    cloud: 'Native stream + HTTPS proxy',
     local: 'Native stream + proxy',
     offline: 'IndexedDB Vault + MP4',
     shield: 'SSRF + MIME + SHA-256',
@@ -24,28 +30,28 @@ const SOURCE_MATRIX = [
     cloud: 'JSON metadata + MP4',
     local: 'JSON metadata + MP4',
     offline: 'IndexedDB Vault + MP4',
-    shield: 'SSRF + Title screening',
+    shield: 'SSRF + Host screening',
   },
   {
-    platform: 'X (Twitter)',
-    cloud: 'Syndication MP4 variants',
+    platform: 'X (Twitter) / Reddit',
+    cloud: 'Syndication / JSON MP4 + HLS',
     local: 'yt-dlp + MP4 variants',
     offline: 'IndexedDB Vault + MP4',
     shield: 'Sensitivity + Tracker strip',
   },
   {
-    platform: 'YouTube / Vimeo',
+    platform: 'YouTube / Vimeo / Dailymotion',
     cloud: 'Isolated nocookie / DNT',
     local: 'yt-dlp + ffmpeg MP4 merge',
     offline: 'Local yt-dlp -> Vault',
     shield: 'isFamilySafe + Age check',
   },
   {
-    platform: 'Instagram / TikTok / Shorteners',
-    cloud: 'Redirect unwrap + OG video',
+    platform: 'Instagram / TikTok / General Web',
+    cloud: 'Outlink unwrap + OG/HTML5 video',
     local: 'yt-dlp full extraction',
     offline: 'Direct / yt-dlp -> Vault',
-    shield: '5-hop anti-gambling shield',
+    shield: '5-hop ad & binary block only',
   },
 ];
 
@@ -86,6 +92,36 @@ export default function HomePage() {
                 <span>{t('hero.ctaVault')}</span>
               </Link>
             </div>
+
+            <dl
+              className="grid grid-cols-2 sm:grid-cols-4 gap-5 pt-4 border-t border-[var(--pr-rule)] pr-enter"
+              style={{ ['--pr-i' as string]: 4 }}
+            >
+              <div>
+                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">Shield Gates</dt>
+                <dd className="text-2xl font-semibold text-[var(--pr-ink)] m-0 mt-0.5">
+                  <CountUpMetric value={5} />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">Ad Scripts</dt>
+                <dd className="text-2xl font-semibold text-[var(--pr-ink)] m-0 mt-0.5">
+                  <CountUpMetric value={0} />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">Source Engines</dt>
+                <dd className="text-2xl font-semibold text-[var(--pr-ink)] m-0 mt-0.5">
+                  <CountUpMetric value={9} suffix="+" />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">Offline Seek</dt>
+                <dd className="text-2xl font-semibold text-[var(--pr-ink)] m-0 mt-0.5">
+                  <CountUpMetric value={0} suffix=" ms" />
+                </dd>
+              </div>
+            </dl>
           </div>
 
           <div className="lg:col-span-5">
@@ -94,22 +130,28 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Progressive Edge-Masked Source & Security Ribbon */}
+      {/* Progressive Dual Edge-Masked Source & Security Ribbon */}
       <SourceMarquee />
 
       {/* Primary Interactive Link Inspector & Isolated Player */}
       <section id="workbench" className="pr-wrap pt-10 sm:pt-12">
-        <VideoWorkbench />
+        <ScrollRise>
+          <VideoWorkbench />
+        </ScrollRise>
       </section>
 
-      {/* Live URL Anatomy & Anti-Gambling / Phishing Sandbox */}
+      {/* Live URL Anatomy & Ad-Only Block Sandbox */}
       <section className="pr-wrap pt-14 sm:pt-16">
-        <ThreatSimulator />
+        <ScrollRise>
+          <ThreatSimulator />
+        </ScrollRise>
       </section>
 
       {/* Interactive Mountain Zero-Signal Resilience Simulator */}
       <section className="pr-wrap pt-12 sm:pt-14">
-        <MountainSimulator />
+        <ScrollRise>
+          <MountainSimulator />
+        </ScrollRise>
       </section>
 
       {/* Sticky Stacking 5-Layer Defense Architecture (skiper16 pattern) */}

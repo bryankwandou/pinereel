@@ -135,8 +135,8 @@ body {
 .pr-display {
   font-family: var(--pr-font-display);
   font-size: var(--pr-t-display);
-  line-height: 1.02;
-  letter-spacing: -0.028em;
+  line-height: 0.98;
+  letter-spacing: -0.032em;
   font-weight: 500;
   color: var(--pr-ink);
   text-wrap: balance;
@@ -642,6 +642,15 @@ html:has(dialog[open]) {
   }
 }
 
+@keyframes pr-marquee-reverse {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
 .pr-marquee-wrap {
   mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 8%, #000 92%, transparent 100%);
@@ -654,8 +663,22 @@ html:has(dialog[open]) {
   animation: pr-marquee 38s linear infinite;
 }
 
+.pr-marquee-track--reverse {
+  animation: pr-marquee-reverse 44s linear infinite;
+}
+
 .pr-marquee-wrap:hover .pr-marquee-track {
   animation-play-state: paused;
+}
+
+.pr-stage-dark {
+  background:
+    radial-gradient(28rem 20rem at 50% 42%, rgba(51, 194, 136, 0.14), transparent 72%),
+    #0c1512;
+  color: #f2f1ec;
+  border: 1px solid #243830;
+  border-radius: var(--pr-r-xl);
+  box-shadow: var(--pr-e3);
 }
 
 @media (prefers-reduced-motion: reduce) {

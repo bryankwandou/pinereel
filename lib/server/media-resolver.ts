@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   classifyMetadataSafety,
+  isAdNetworkHost,
   type SafetyReport,
   type SourcePlatform,
 } from '@/lib/shared/safety';
@@ -402,11 +403,24 @@ async function resolveDirectMedia(url: string, safety: SafetyReport): Promise<Re
     await assertSafeRemoteUrl(url);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6500);
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: 'HEAD',
       signal: controller.signal,
-      headers: { 'User-Agent': 'PineReelMediaInspector/1.0' },
-    }).finally(() => clearTimeout(timer));
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; PineReelMediaInspector/1.0)' },
+    });
+
+    if (res.status === 405 || res.status === 403 || res.status === 501) {
+      res = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; PineReelMediaInspector/1.0)',
+          Range: 'bytes=0-0',
+        },
+      });
+      await res.body?.cancel().catch(() => {});
+    }
+    clearTimeout(timer);
 
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     const contentLengthRaw = res.headers.get('content-length');
@@ -1063,6 +1077,100 @@ function extractMetaTag(html: string, nameOrProp: string): string | null {
   return m ? decodeHtmlEntities(m[1] || m[2] || '') : null;
 }
 
+async function resolveRedditCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
+  try {
+    await assertSafeRemoteUrl(url);
+    const base = url.split('?')[0].replace(/\/$/, '');
+    if (!/reddit\.com/i.test(base)) return null;
+    const listings = await fetchJsonWithTimeout<
+      {
+        data?: {
+          children?: {
+            data?: {
+              title?: string;
+              author?: string;
+              over_18?: boolean;
+              thumbnail?: string;
+              secure_media?: {
+                reddit_video?: {
+                  fallback_url?: string;
+                  hls_url?: string;
+                  duration?: number;
+                  height?: number;
+                };
+              };
+            };
+          }[];
+        };
+      }[]
+    >(`${base}.json`);
+
+    const post = listings?.[0]?.data?.children?.[0]?.data;
+    const rv = post?.secure_media?.reddit_video;
+    if (!post && !rv) return null;
+
+    const title = post?.title || 'Reddit Video';
+    const variants: MediaStreamVariant[] = [];
+    if (rv?.fallback_url && /^https?:/i.test(rv.fallback_url)) {
+      variants.push({
+        id: 'reddit-mp4',
+        label: rv.height ? `${rv.height}p MP4` : 'Direct MP4',
+        ext: 'mp4',
+        url: rv.fallback_url,
+        proxyUrl: buildProxyUrl(rv.fallback_url),
+        downloadUrl: buildDownloadUrl(rv.fallback_url, title, 'mp4', url),
+        qualityHeight: rv.height ?? null,
+        hasAudio: false,
+        hasVideo: true,
+        filesizeBytes: null,
+        mimeType: 'video/mp4',
+        isHls: false,
+      });
+    }
+    if (rv?.hls_url && /^https?:/i.test(rv.hls_url)) {
+      variants.push({
+        id: 'reddit-hls',
+        label: 'HLS Adaptive',
+        ext: 'm3u8',
+        url: rv.hls_url,
+        proxyUrl: buildProxyUrl(rv.hls_url),
+        downloadUrl: buildDownloadUrl(rv.hls_url, title, 'm3u8', url),
+        qualityHeight: rv.height ?? null,
+        hasAudio: true,
+        hasVideo: true,
+        filesizeBytes: null,
+        mimeType: 'application/vnd.apple.mpegurl',
+        isHls: true,
+      });
+    }
+    if (variants.length === 0) return null;
+
+    const updatedSafety = classifyMetadataSafety(safety, {
+      title,
+      possiblySensitive: post?.over_18,
+    });
+    const preferred = variants.find((v) => !v.isHls) ?? variants[0];
+
+    return {
+      ok: true,
+      engine: 'cloud-extractor',
+      safety: updatedSafety,
+      title,
+      author: post?.author ? `u/${post.author}` : 'Reddit',
+      durationSeconds: rv?.duration ?? null,
+      thumbnailUrl: post?.thumbnail && /^https?:/i.test(post.thumbnail) ? post.thumbnail : null,
+      streams: variants,
+      preferredStreamUrl: preferred.proxyUrl,
+      privacyEmbedUrl: null,
+      offlineCapable: variants.some((v) => !v.isHls),
+      offlineNote: 'Reddit media resolved cleanly without surrounding feed scripts or ads.',
+      ytdlpAvailable: await isYtdlpAvailable(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function resolveAnyWebVideoPage(
   url: string,
   safety: SafetyReport,
@@ -1142,16 +1250,45 @@ async function resolveAnyWebVideoPage(
     });
   }
 
-  // Detect clean embedded video iframes on general web pages (stripping page ads!)
+  // Detect clean embedded video iframes on general web pages (skipping all ad-network frames!)
   let embedFallback: string | null = null;
   if (variants.length === 0) {
     const ytEmbed = html.match(/https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{11})/);
     if (ytEmbed?.[1]) {
-      embedFallback = `https://www.youtube-nocookie.com/embed/${ytEmbed[1]}?rel=0&modestbranding=1`;
+      embedFallback = `https://www.youtube-nocookie.com/embed/${ytEmbed[1]}?rel=0&modestbranding=1&iv_load_policy=3`;
     } else {
       const vmEmbed = html.match(/https:\/\/player\.vimeo\.com\/video\/(\d+)/);
       if (vmEmbed?.[1]) {
         embedFallback = `https://player.vimeo.com/video/${vmEmbed[1]}?dnt=1`;
+      } else {
+        const jsonEmbed = html.match(/"embedUrl"\s*:\s*"([^"]+)"/i)?.[1]?.replace(/\\\//g, '/');
+        if (jsonEmbed && /^https:\/\//i.test(jsonEmbed)) {
+          try {
+            if (!isAdNetworkHost(new URL(jsonEmbed).hostname)) embedFallback = jsonEmbed;
+          } catch {
+            // Skip invalid embedUrl
+          }
+        }
+        if (!embedFallback) {
+          for (const frameMatch of html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) {
+            const rawSrc = decodeHtmlEntities(frameMatch[1] || '');
+            if (!/^https:\/\//i.test(rawSrc)) continue;
+            try {
+              const u = new URL(rawSrc);
+              if (isAdNetworkHost(u.hostname)) continue;
+              if (
+                /vimeo|dailymotion|peertube|rumble|loom|ted\.com|twitch\.tv|bilibili|archive\.org|youtube/i.test(
+                  u.hostname + u.pathname
+                )
+              ) {
+                embedFallback = u.toString();
+                break;
+              }
+            } catch {
+              continue;
+            }
+          }
+        }
       }
     }
   }
@@ -1250,6 +1387,10 @@ export async function resolveVideoSource(rawUrl: string): Promise<ResolvedMedia>
   if (safety.sourceType === 'tiktok') {
     const tt = await resolveTikTokCloud(cleanUrl, safety);
     if (tt) return tt;
+  }
+  if (safety.sourceType === 'reddit') {
+    const rd = await resolveRedditCloud(cleanUrl, safety);
+    if (rd) return rd;
   }
   if (safety.sourceType === 'instagram') {
     const ig = await resolveInstagramCloud(cleanUrl, safety);

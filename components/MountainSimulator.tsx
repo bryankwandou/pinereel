@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { CheckCircle2, HardDrive, Mountain, Wifi, WifiOff } from 'lucide-react';
+import { useSafeReducedMotion } from './MotionKit';
 
 export function MountainSimulator() {
-  const reduce = useReducedMotion();
+  const reduce = useSafeReducedMotion();
   const [signalPct, setSignalPct] = useState(0);
 
   const isDeadZone = signalPct < 15;
@@ -14,8 +15,8 @@ export function MountainSimulator() {
   const zoneLabel = isDeadZone
     ? 'Highland Ridge · 0 Bars (No Cellular Signal)'
     : isWeak
-    ? 'Foothill Trail · Weak Edge Signal'
-    : 'Town Basecamp · Full 4G / Fiber';
+      ? 'Foothill Trail · Weak Edge Signal'
+      : 'Town Basecamp · Full 4G / Fiber';
 
   const bars = signalPct === 0 ? 0 : signalPct < 25 ? 1 : signalPct < 55 ? 2 : signalPct < 80 ? 3 : 4;
 
@@ -72,7 +73,7 @@ export function MountainSimulator() {
       {/* Interactive Live Status Telemetry Panel */}
       <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
         <motion.div
-          animate={{ opacity: isDeadZone ? 0.55 : 1 }}
+          animate={{ opacity: isDeadZone ? 0.65 : 1 }}
           transition={reduce ? { duration: 0.01 } : { duration: 0.25 }}
           className="p-5 rounded-[var(--pr-r-lg)] border border-[var(--pr-rule)] bg-[var(--pr-sunken)] space-y-3"
         >
@@ -102,8 +103,8 @@ export function MountainSimulator() {
             {isDeadZone
               ? 'External Embed Unreachable'
               : isWeak
-              ? 'Buffering / High Latency'
-              : 'Live Resolution Active'}
+                ? 'Buffering / High Latency'
+                : 'Live Resolution Active'}
           </p>
           <p className="text-xs text-[var(--pr-ink-3)] pr-mono m-0">
             {isDeadZone ? 'Packet Loss: 100%' : `Downlink: ${(signalPct * 0.48).toFixed(1)} Mbps`}
@@ -111,26 +112,26 @@ export function MountainSimulator() {
         </motion.div>
 
         <motion.div
+          data-allow-dark="true"
           animate={{ scale: isDeadZone && !reduce ? 1.02 : 1 }}
           transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-          className="p-5 rounded-[var(--pr-r-lg)] border-2 border-[var(--pr-signal)] bg-[var(--pr-raised)] space-y-3"
-          style={{ boxShadow: 'var(--pr-e2)' }}
+          className="p-5 pr-stage-dark space-y-3"
         >
           <div className="flex items-center justify-between">
-            <span className="pr-mono text-xs font-semibold text-[var(--pr-signal)]">
+            <span className="pr-mono text-xs font-semibold text-[#5fe09e]">
               INDEXEDDB VAULT
             </span>
-            <CheckCircle2 size={16} className="text-[var(--pr-good)]" aria-hidden="true" />
+            <CheckCircle2 size={16} className="text-[#5fe09e]" aria-hidden="true" />
           </div>
 
-          <div className="text-2xl font-semibold pr-mono text-[var(--pr-ink)]">
-            0.0 ms <span className="text-xs text-[var(--pr-ink-3)]">seek</span>
+          <div className="text-3xl font-semibold pr-mono text-[#f2f1ec]">
+            0.0 ms <span className="text-xs text-[#929e98]">seek</span>
           </div>
 
-          <p className="text-sm font-semibold text-[var(--pr-ink)] m-0">
+          <p className="text-sm font-semibold text-[#f2f1ec] m-0">
             Local Blob Playback Ready
           </p>
-          <p className="text-xs text-[var(--pr-ink-2)] pr-mono m-0">
+          <p className="text-xs text-[#c5ccc8] pr-mono m-0">
             SHA-256 Verified · SW Shell Active
           </p>
         </motion.div>

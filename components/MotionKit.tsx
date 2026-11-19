@@ -12,14 +12,16 @@
 
 import Link from 'next/link';
 import {
+  animate,
   motion,
+  useInView,
   useMotionValue,
   useReducedMotion,
   useScroll,
   useSpring,
 } from 'framer-motion';
 import { ArrowUpRight } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export function useSafeReducedMotion(): boolean {
   const raw = useReducedMotion();
@@ -105,7 +107,7 @@ export function KineticLine({
   accent?: boolean;
   baseDelayMs?: number;
 }) {
-  const reduce = useReducedMotion();
+  const reduce = useSafeReducedMotion();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -205,7 +207,7 @@ export function Magnetic({
   children: ReactNode;
   strength?: number;
 }) {
-  const reduce = useReducedMotion();
+  const reduce = useSafeReducedMotion();
   const x = useSpring(0, { stiffness: 170, damping: 16 });
   const y = useSpring(0, { stiffness: 170, damping: 16 });
 
@@ -247,7 +249,7 @@ export function SpringTabs<T extends string>({
   onChange: (next: T) => void;
   label: string;
 }) {
-  const reduce = useReducedMotion();
+  const reduce = useSafeReducedMotion();
 
   return (
     <div
@@ -287,5 +289,95 @@ export function SpringTabs<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+export function CountUpMetric({
+  value,
+  suffix = '',
+  prefix = '',
+}: {
+  value: number;
+  suffix?: string;
+  prefix?: string;
+}) {
+  const reduce = useSafeReducedMotion();
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, amount: 0.4 });
+  const [display, setDisplay] = useState(value);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (reduce || !inView || startedRef.current) return;
+    startedRef.current = true;
+    const ctrl = animate(0, value, {
+      duration: 0.65,
+      ease: [0.22, 1, 0.36, 1],
+      onUpdate: (latest) => setDisplay(Math.round(latest)),
+      onComplete: () => setDisplay(value),
+    });
+    return () => ctrl.stop();
+  }, [inView, reduce, value]);
+
+  return (
+    <span ref={ref} className="pr-mono">
+      {prefix}
+      {reduce ? value : display}
+      {suffix}
+    </span>
+  );
+}
+
+export function StrikeThroughSweep({
+  children,
+  delayMs = 420,
+}: {
+  children: ReactNode;
+  delayMs?: number;
+}) {
+  const reduce = useSafeReducedMotion();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  return (
+    <span className="relative inline-block">
+      {children}
+      {mounted && !reduce && (
+        <motion.span
+          aria-hidden="true"
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: 1 }}
+          transition={{ duration: 0.45, delay: delayMs / 1000, ease: [0.22, 1, 0.36, 1] }}
+          className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[3px] origin-left rounded-full pointer-events-none"
+          style={{ background: 'var(--pr-bad)' }}
+        />
+      )}
+    </span>
+  );
+}
+
+export function ScrollRise({
+  children,
+  className = '',
+  delayMs = 0,
+}: {
+  children: ReactNode;
+  className?: string;
+  delayMs?: number;
+}) {
+  const reduce = useSafeReducedMotion();
+  if (reduce) {
+    return <div className={className}>{children}</div>;
+  }
+  return (
+    <motion.div
+      initial={{ y: 14 }}
+      whileInView={{ y: 0 }}
+      viewport={{ once: true, amount: 0.12 }}
+      transition={{ duration: 0.42, delay: delayMs / 1000, ease: [0.22, 1, 0.36, 1] }}
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }

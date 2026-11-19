@@ -3,74 +3,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 export type SimMode = 'intercept' | 'clean' | 'vault';
 
-interface Palette {
-  signal: string;
-  good: string;
-  bad: string;
-  warn: string;
-  ink: string;
-  rule: string;
-}
-
-const FALLBACK: Palette = {
-  signal: '#0E5A3E',
-  good: '#0F5E38',
-  bad: '#A9221C',
-  warn: '#844D06',
-  ink: '#0E1311',
-  rule: '#C8C2B3',
+const STAGE_PALETTE = {
+  signal: '#33C288',
+  good: '#5FE09E',
+  bad: '#F88A84',
+  warn: '#F5B952',
+  ridge: '#2B4A3E',
+  ring: '#3E5E52',
 };
 
-function readPalette(): Palette {
-  if (typeof window === 'undefined') return FALLBACK;
-  const cs = getComputedStyle(document.documentElement);
-  const pick = (name: string, fb: string) => cs.getPropertyValue(name).trim() || fb;
-  return {
-    signal: pick('--pr-signal', FALLBACK.signal),
-    good: pick('--pr-good', FALLBACK.good),
-    bad: pick('--pr-bad', FALLBACK.bad),
-    warn: pick('--pr-warn', FALLBACK.warn),
-    ink: pick('--pr-ink', FALLBACK.ink),
-    rule: pick('--pr-rule-2', FALLBACK.rule),
-  };
-}
-
-function useThemePalette() {
-  const [palette, setPalette] = useState<Palette>(FALLBACK);
-  useEffect(() => {
-    const sync = () => setPalette(readPalette());
-    sync();
-    const mo = new MutationObserver(sync);
-    mo.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme', 'class', 'style'],
-    });
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    mq.addEventListener('change', sync);
-    return () => {
-      mo.disconnect();
-      mq.removeEventListener('change', sync);
-    };
-  }, []);
-  return palette;
-}
-
-function MountainRidgeWire({ palette, active }: { palette: Palette; active: boolean }) {
+function MountainRidgeWire({ active }: { active: boolean }) {
   const geom = useMemo(() => {
-    const g = new THREE.PlaneGeometry(11, 6, 26, 14);
+    const g = new THREE.PlaneGeometry(13, 6.5, 28, 16);
     g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
       const ridge =
-        Math.exp(-Math.pow((x - 1.6) * 0.45, 2)) * 1.15 +
-        Math.sin(x * 0.9) * Math.cos(z * 1.1) * 0.38;
-      pos.setY(i, ridge - 2.25);
+        Math.exp(-Math.pow((x - 1.2) * 0.42, 2)) * 1.15 +
+        Math.sin(x * 0.85) * Math.cos(z * 1.05) * 0.34;
+      pos.setY(i, ridge - 2.15);
     }
     g.computeVertexNormals();
     return g;
@@ -79,10 +35,10 @@ function MountainRidgeWire({ palette, active }: { palette: Palette; active: bool
   return (
     <mesh geometry={geom}>
       <meshBasicMaterial
-        color={active ? palette.signal : palette.rule}
+        color={active ? STAGE_PALETTE.signal : STAGE_PALETTE.ridge}
         wireframe
         transparent
-        opacity={active ? 0.34 : 0.16}
+        opacity={active ? 0.52 : 0.28}
       />
     </mesh>
   );
@@ -94,66 +50,70 @@ interface PacketSpec {
   laneZ: number;
   kind: 'safe' | 'threat' | 'tracker';
   speed: number;
+  phi: number;
+  theta: number;
 }
 
 function StreamPackets({
-  palette,
   still,
   mode,
 }: {
-  palette: Palette;
   still: boolean;
   mode: SimMode;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const groupRef = useRef<THREE.Group>(null);
-  const scanGateRef = useRef<THREE.Mesh>(null);
+  const gateGroupRef = useRef<THREE.Group>(null);
+  const coreRef = useRef<THREE.Mesh>(null);
   const { invalidate, pointer } = useThree();
 
   const packets = useMemo<PacketSpec[]>(() => {
     const out: PacketSpec[] = [];
-    for (let i = 0; i < 64; i++) {
+    const count = 72;
+    for (let i = 0; i < count; i++) {
       const h1 = Math.abs(Math.sin((i + 1) * 12.9898) * 43758.5453) % 1;
       const h2 = Math.abs(Math.sin((i + 1) * 78.233) * 19341.123) % 1;
       const kind: PacketSpec['kind'] =
-        i % 4 === 0 ? 'threat' : i % 4 === 1 ? 'tracker' : 'safe';
+        i % 5 === 0 ? 'threat' : i % 5 === 1 ? 'tracker' : 'safe';
       out.push({
-        phase: i / 64,
-        laneY: (h1 - 0.5) * 3.0,
-        laneZ: (h2 - 0.5) * 2.5,
+        phase: i / count,
+        laneY: (h1 - 0.5) * 2.2,
+        laneZ: (h2 - 0.5) * 2.1,
         kind,
-        speed: 0.13 + (i % 5) * 0.02,
+        speed: 0.14 + (i % 5) * 0.022,
+        phi: Math.acos(1 - (2 * (i + 0.5)) / count),
+        theta: Math.PI * (1 + Math.sqrt(5)) * i,
       });
     }
     return out;
   }, []);
 
-  const geometry = useMemo(() => new RoundedBoxGeometry(0.42, 0.28, 0.28, 3, 0.05), []);
+  const geometry = useMemo(() => new THREE.SphereGeometry(0.115, 16, 16), []);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   useEffect(() => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    const cSafe = new THREE.Color(palette.signal);
-    const cGood = new THREE.Color(palette.good);
-    const cThreat = new THREE.Color(palette.bad);
-    const cWarn = new THREE.Color(palette.warn);
+    const cSafe = new THREE.Color(STAGE_PALETTE.signal);
+    const cGood = new THREE.Color(STAGE_PALETTE.good);
+    const cThreat = new THREE.Color(STAGE_PALETTE.bad);
+    const cWarn = new THREE.Color(STAGE_PALETTE.warn);
 
     packets.forEach((p, idx) => {
       if (mode === 'clean') {
         mesh.setColorAt(idx, idx % 2 === 0 ? cSafe : cGood);
       } else if (mode === 'vault') {
-        mesh.setColorAt(idx, p.kind === 'threat' ? cWarn : cSafe);
+        mesh.setColorAt(idx, idx % 3 === 0 ? cGood : cSafe);
       } else {
         mesh.setColorAt(
           idx,
-          p.kind === 'threat' ? cThreat : p.kind === 'tracker' ? cWarn : cSafe
+          p.kind === 'threat' ? cThreat : p.kind === 'tracker' ? cWarn : cGood
         );
       }
     });
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     invalidate();
-  }, [palette, packets, mode, invalidate]);
+  }, [packets, mode, invalidate]);
 
   const placeAt = (elapsed: number) => {
     const mesh = meshRef.current;
@@ -161,63 +121,65 @@ function StreamPackets({
 
     packets.forEach((p, idx) => {
       if (mode === 'vault') {
-        // Organized 4x4x4 offline Alpine Vault cube floating cleanly above mountain ridge
-        const col = idx % 4;
-        const row = Math.floor(idx / 4) % 4;
-        const layer = Math.floor(idx / 16);
-        const bob = still ? 0 : Math.sin(elapsed * 1.4 + idx * 0.25) * 0.06;
-        dummy.position.set(
-          1.1 + (col - 1.5) * 0.62,
-          -0.25 + (row - 1.5) * 0.46 + bob,
-          (layer - 1.5) * 0.54
-        );
-        dummy.rotation.set(0, 0.06, 0);
-        dummy.scale.setScalar(1);
+        // Geodesic encrypted vault sphere orbiting above alpine ridge
+        const r = 1.65;
+        const spin = still ? 0.35 : elapsed * 0.42;
+        const a = p.theta + spin;
+        const x = 1.25 + r * Math.sin(p.phi) * Math.cos(a);
+        const y = 0.08 + r * Math.cos(p.phi);
+        const z = r * Math.sin(p.phi) * Math.sin(a);
+        const pulse = still ? 1 : 0.92 + Math.sin(elapsed * 2 + idx * 0.3) * 0.12;
+        dummy.position.set(x, y, z);
+        dummy.scale.setScalar(pulse);
         dummy.updateMatrix();
         mesh.setMatrixAt(idx, dummy.matrix);
         return;
       }
 
       const t = (p.phase + elapsed * p.speed) % 1;
-      const x = -4.6 + t * 9.2;
-      let y = p.laneY;
+      const x = -4.2 + t * 8.4;
+      let y = p.laneY + (still ? 0 : Math.sin(elapsed * 1.3 + p.phase * 12) * 0.14);
       let z = p.laneZ;
       let scale = 1;
 
       const blocked = mode === 'intercept' && p.kind !== 'safe';
-      if (blocked && x > -0.6) {
-        const drop = Math.min(1, (x + 0.6) / 1.4);
-        y -= drop * 2.4;
-        z += (p.kind === 'threat' ? 1 : -1) * drop * 0.8;
-        scale = Math.max(0.001, 1 - drop * 0.9);
-      } else if (x > 0.5) {
-        const snap = Math.min(1, (x - 0.5) / 1.9);
-        const gridY = ((idx % 3) - 1) * 0.66;
-        const gridZ = (((idx >> 1) % 3) - 1) * 0.64;
-        y = THREE.MathUtils.lerp(p.laneY, gridY, snap);
-        z = THREE.MathUtils.lerp(p.laneZ, gridZ, snap);
+      if (blocked && x > -0.75) {
+        const drop = Math.min(1, (x + 0.75) / 1.15);
+        y -= drop * 2.25;
+        z += (p.kind === 'threat' ? 1.1 : -1.1) * drop;
+        scale = Math.max(0.001, 1 - drop * 0.92);
+      } else if (x > 0.25) {
+        const focus = Math.min(1, (x - 0.25) / 1.8);
+        const angle = idx * 0.55 + (still ? 0 : elapsed * 0.8);
+        const helixR = (1 - focus * 0.6) * 0.9;
+        y = THREE.MathUtils.lerp(y, Math.sin(angle) * helixR, focus);
+        z = THREE.MathUtils.lerp(z, Math.cos(angle) * helixR, focus);
+        scale = 1 + focus * 0.25;
       }
 
       dummy.position.set(x, y, z);
-      dummy.rotation.set(
-        blocked && x > -0.6 ? x * 1.8 : 0,
-        blocked ? x * 1.1 : 0.14,
-        0
-      );
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(idx, dummy.matrix);
     });
     mesh.instanceMatrix.needsUpdate = true;
 
-    if (scanGateRef.current) {
-      scanGateRef.current.position.x = still ? 0 : Math.sin(elapsed * 1.6) * 0.55;
+    if (gateGroupRef.current && !still) {
+      gateGroupRef.current.children.forEach((child, idx) => {
+        child.rotation.x = 0;
+        child.rotation.y = Math.PI / 2;
+        child.rotation.z = elapsed * (idx % 2 === 0 ? 0.35 : -0.28) + idx * 0.5;
+      });
+    }
+    if (coreRef.current && !still) {
+      coreRef.current.rotation.y = elapsed * 0.5;
+      coreRef.current.rotation.x = Math.sin(elapsed * 0.6) * 0.2;
     }
   };
 
   useEffect(() => {
     if (still) {
-      placeAt(2.8);
+      placeAt(2.4);
       invalidate();
     }
   });
@@ -228,53 +190,60 @@ function StreamPackets({
     if (groupRef.current) {
       groupRef.current.rotation.y = THREE.MathUtils.lerp(
         groupRef.current.rotation.y,
-        pointer.x * 0.16,
-        0.05
+        pointer.x * 0.2,
+        0.06
       );
       groupRef.current.rotation.x = THREE.MathUtils.lerp(
         groupRef.current.rotation.x,
-        -pointer.y * 0.07,
-        0.05
+        -pointer.y * 0.09,
+        0.06
       );
     }
   });
 
   return (
     <group ref={groupRef}>
-      <MountainRidgeWire palette={palette} active={mode === 'vault'} />
+      <MountainRidgeWire active={mode === 'vault'} />
 
-      {/* Five vertical isolation gates */}
-      {[-0.6, -0.3, 0, 0.3, 0.6].map((xPos, i) => (
-        <mesh key={i} position={[xPos, 0, 0]}>
-          <boxGeometry args={[0.02, 3.4, 2.8]} />
-          <meshStandardMaterial
-            color={palette.rule}
-            transparent
-            opacity={mode === 'vault' ? 0.12 : 0.3}
-            roughness={0.5}
-          />
-        </mesh>
-      ))}
+      {/* Three hexagonal geometric filter gates rotated orthogonal to stream axis */}
+      <group ref={gateGroupRef} position={[-0.25, 0, 0]}>
+        {[-0.55, 0, 0.55].map((xPos, idx) => (
+          <mesh key={idx} position={[xPos, 0, 0]} rotation={[0, Math.PI / 2, idx * 0.4]}>
+            <torusGeometry args={[1.45 - idx * 0.14, 0.03, 12, 6]} />
+            <meshStandardMaterial
+              color={idx === 0 && mode === 'intercept' ? STAGE_PALETTE.warn : STAGE_PALETTE.signal}
+              emissive={idx === 0 && mode === 'intercept' ? STAGE_PALETTE.warn : STAGE_PALETTE.signal}
+              emissiveIntensity={0.4}
+              roughness={0.25}
+              metalness={0.5}
+              transparent
+              opacity={mode === 'vault' ? 0.2 : 0.85}
+            />
+          </mesh>
+        ))}
+      </group>
 
-      {/* Active scanning beam across gates */}
-      <mesh ref={scanGateRef} position={[0, 0, 0]}>
-        <boxGeometry args={[0.04, 3.55, 2.9]} />
+      {/* Alpine crystal core representing verified stream or offline encrypted bundle */}
+      <mesh ref={coreRef} position={[1.45, 0.06, 0]}>
+        <icosahedronGeometry args={[mode === 'vault' ? 0.72 : 0.5, 0]} />
         <meshStandardMaterial
-          color={palette.signal}
-          transparent
-          opacity={mode === 'vault' ? 0.08 : 0.42}
+          color={STAGE_PALETTE.signal}
+          emissive={STAGE_PALETTE.signal}
+          emissiveIntensity={0.35}
+          wireframe={mode !== 'vault'}
+          roughness={0.2}
+          metalness={0.6}
         />
       </mesh>
 
       <instancedMesh ref={meshRef} args={[geometry, undefined, packets.length]}>
-        <meshStandardMaterial roughness={0.35} metalness={0.1} />
+        <meshStandardMaterial roughness={0.22} metalness={0.25} />
       </instancedMesh>
     </group>
   );
 }
 
 export default function VaultShieldCanvas({ mode }: { mode: SimMode }) {
-  const palette = useThemePalette();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(true);
   const [still, setStill] = useState(false);
@@ -309,31 +278,46 @@ export default function VaultShieldCanvas({ mode }: { mode: SimMode }) {
     <div
       ref={wrapRef}
       aria-hidden="true"
-      className="w-full h-full relative rounded-[var(--pr-r-lg)] border border-[var(--pr-rule)] bg-[var(--pr-raised)] overflow-hidden"
+      data-allow-dark="true"
+      className="w-full h-full flex flex-col pr-stage-dark overflow-hidden"
     >
-      <Canvas
-        orthographic
-        dpr={[1, 1.75]}
-        frameloop={still ? 'demand' : visible ? 'always' : 'never'}
-        camera={{ position: [5.8, 3.9, 7.8], zoom: 48, near: 0.1, far: 100 }}
-        gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
-        onCreated={({ invalidate }) => {
-          invalidate();
-        }}
-      >
-        <ambientLight intensity={0.95} />
-        <directionalLight position={[-6, 10, 8]} intensity={1.5} />
-        <directionalLight position={[7, 3, -6]} intensity={0.5} />
-        <StreamPackets palette={palette} still={still} mode={mode} />
-      </Canvas>
-      <div className="absolute top-3 inset-x-3 flex items-center justify-between text-[10px] pr-mono text-[var(--pr-ink-3)] pointer-events-none">
-        <span>GATES 01..05</span>
-        <span>
+      {/* Dedicated HUD header strip outside the WebGL canvas so 3D geometry never overlaps text */}
+      <div className="px-4 py-2.5 border-b border-[#243830] bg-[#101c18] flex items-center justify-between text-[11px] pr-mono text-[#c5ccc8]">
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full bg-[#33c288]" />
+          <span>GATES 01..05</span>
+        </span>
+        <span className="text-[#5fe09e]">
           {mode === 'intercept'
             ? 'DEFLECTING TRACKERS + LURES'
             : mode === 'vault'
-            ? '0-SIGNAL VAULT GRID'
-            : 'VERIFIED PASS-THROUGH'}
+            ? '0-SIGNAL VAULT GEOMETRY'
+            : 'AD-FREE STREAM TUNNEL'}
+        </span>
+      </div>
+
+      <div className="relative flex-1 min-h-[250px]">
+        <Canvas
+          orthographic
+          dpr={[1, 1.75]}
+          frameloop={still ? 'demand' : visible ? 'always' : 'never'}
+          camera={{ position: [5.4, 3.6, 7.6], zoom: 50, near: 0.1, far: 100 }}
+          gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+          onCreated={({ invalidate }) => {
+            invalidate();
+          }}
+        >
+          <ambientLight intensity={0.85} />
+          <directionalLight position={[-6, 10, 8]} intensity={1.8} />
+          <directionalLight position={[7, 3, -6]} intensity={0.75} color="#5fe09e" />
+          <StreamPackets still={still} mode={mode} />
+        </Canvas>
+      </div>
+
+      <div className="px-4 py-2 border-t border-[#243830] bg-[#101c18] flex items-center justify-between text-[11px] pr-mono text-[#929e98]">
+        <span>72 STREAM NODES · POINTER TILT</span>
+        <span className="text-[#f2f1ec]">
+          {mode === 'intercept' ? 'AD WRAPPERS ISOLATED' : mode === 'vault' ? 'INDEXEDDB SHA-256' : 'HTTPS RANGE PROXY'}
         </span>
       </div>
     </div>

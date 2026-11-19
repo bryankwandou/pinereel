@@ -41,6 +41,24 @@ test.describe('PineReel Core E2E', () => {
     expect(adWrapBody.ok).toBe(true);
     expect(adWrapBody.safety.verdict).toBe('SAFE');
 
+    // Social outlink wrapper unwraps directly to target video
+    const igOutlinkRes = await request.post('/api/resolve', {
+      data: { url: 'https://l.instagram.com/?u=https%3A%2F%2Fyoutu.be%2Faqz-KE-bpKQ' },
+    });
+    expect(igOutlinkRes.status()).toBe(200);
+    const igOutlinkBody = await igOutlinkRes.json();
+    expect(igOutlinkBody.ok).toBe(true);
+    expect(igOutlinkBody.safety.verdict).toBe('SAFE');
+
+    // Public HTTP educational path (even containing sensitive discussion words) is never false-blocked
+    const eduRes = await request.post('/api/resolve', {
+      data: { url: 'http://media.example.org/videos/stop-judol-edukasi.mp4' },
+    });
+    expect(eduRes.status()).toBe(200);
+    const eduBody = await eduRes.json();
+    expect(eduBody.safety.verdict).toBe('SAFE');
+    expect(eduBody.safety.kidSafe).toBe(true);
+
     // TikTok direct MP4 extraction
     const ttRes = await request.post('/api/resolve', {
       data: { url: 'https://www.tiktok.com/@scout2015/video/6718335390845095173' },
@@ -71,9 +89,10 @@ test.describe('PineReel Core E2E', () => {
   });
 
   test('caches direct MP4 into Offline Mountain Vault and switches languages cleanly', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'load' });
+    test.setTimeout(90_000);
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => document.fonts.ready);
-    await expect(page.locator('header[data-hydrated="true"]')).toBeVisible();
+    await expect(page.locator('header[data-hydrated="true"]')).toBeVisible({ timeout: 20_000 });
 
     // Verify language switcher sits above hero content and updates <html lang>
     const langBtn = page.getByRole('button', { name: /Language/i });

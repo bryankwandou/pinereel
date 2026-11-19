@@ -1,5 +1,6 @@
 import dns from 'node:dns/promises';
 import {
+  extractWrappedDestinationUrl,
   isPrivateOrReservedHost,
   isShortenerHost,
   sanitizeAndInspectUrl,
@@ -81,17 +82,41 @@ export async function inspectAndUnwrapUrl(rawInput: string): Promise<SafetyRepor
       };
     }
 
+    const wrappedQueryDest = extractWrappedDestinationUrl(target);
+    if (wrappedQueryDest && !chain.includes(wrappedQueryDest)) {
+      chain.push(wrappedQueryDest);
+      current = wrappedQueryDest;
+      const hopCheck = sanitizeAndInspectUrl(current, chain);
+      if (hopCheck.verdict === 'BLOCKED') {
+        return hopCheck;
+      }
+      continue;
+    }
+
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      const res = await fetch(target.toString(), {
+      let res = await fetch(target.toString(), {
         method: 'HEAD',
         redirect: 'manual',
         signal: controller.signal,
         headers: {
           'User-Agent': 'PineReelSafetyInspector/1.0',
         },
-      }).finally(() => clearTimeout(timer));
+      });
+
+      if (res.status === 405 || res.status === 403 || res.status === 501) {
+        res = await fetch(target.toString(), {
+          method: 'GET',
+          redirect: 'manual',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'PineReelSafetyInspector/1.0',
+            Range: 'bytes=0-4095',
+          },
+        });
+      }
+      clearTimeout(timer);
 
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get('location');
@@ -105,6 +130,24 @@ export async function inspectAndUnwrapUrl(rawInput: string): Promise<SafetyRepor
           return hopCheck;
         }
         continue;
+      }
+
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('text/html') && res.body) {
+        const snippet = (await res.text()).slice(0, 4096);
+        const metaRefresh = snippet.match(
+          /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"'\s>]+)/i
+        );
+        if (metaRefresh?.[1]) {
+          const resolved = new URL(metaRefresh[1], target).toString();
+          if (!chain.includes(resolved)) {
+            chain.push(resolved);
+            current = resolved;
+            const hopCheck = sanitizeAndInspectUrl(current, chain);
+            if (hopCheck.verdict === 'BLOCKED') return hopCheck;
+            continue;
+          }
+        }
       }
       break;
     } catch {

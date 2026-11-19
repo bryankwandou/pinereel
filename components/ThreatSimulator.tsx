@@ -1,9 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ShieldAlert, ShieldCheck, ShieldOff, Sparkles } from 'lucide-react';
 import { sanitizeAndInspectUrl } from '@/lib/shared/safety';
+import { useSafeReducedMotion } from './MotionKit';
 
 const TEST_PAYLOADS = [
   {
@@ -18,8 +19,8 @@ const TEST_PAYLOADS = [
   },
   {
     id: 'generalnews',
-    label: 'General Video (No False Block)',
-    url: 'youtube.com/watch?v=aqz-KE-bpKQ&slot=1&city=bandar',
+    label: 'General Web Video (No False Block)',
+    url: 'http://media.example.org/videos/stop-judol-edukasi.mp4?utm_campaign=share',
   },
   {
     id: 'malware',
@@ -29,7 +30,7 @@ const TEST_PAYLOADS = [
 ];
 
 export function ThreatSimulator() {
-  const reduce = useReducedMotion();
+  const reduce = useSafeReducedMotion();
   const [rawUrl, setRawUrl] = useState(TEST_PAYLOADS[0].url);
   const report = useMemo(() => sanitizeAndInspectUrl(rawUrl), [rawUrl]);
 
@@ -37,8 +38,8 @@ export function ThreatSimulator() {
     report.verdict === 'SAFE'
       ? 'var(--pr-good)'
       : report.verdict === 'CAUTION'
-      ? 'var(--pr-warn)'
-      : 'var(--pr-bad)';
+        ? 'var(--pr-warn)'
+        : 'var(--pr-bad)';
 
   return (
     <div className="pr-card p-6 sm:p-7 space-y-5">
@@ -50,13 +51,12 @@ export function ThreatSimulator() {
 
         <div className="flex items-center gap-2 shrink-0">
           <span
-            className={`pr-badge ${
-              report.verdict === 'SAFE'
+            className={`pr-badge ${report.verdict === 'SAFE'
                 ? 'pr-badge--good'
                 : report.verdict === 'CAUTION'
-                ? 'pr-badge--warn'
-                : 'pr-badge--bad'
-            }`}
+                  ? 'pr-badge--warn'
+                  : 'pr-badge--bad'
+              }`}
           >
             {report.verdict === 'SAFE' ? (
               <ShieldCheck size={12} aria-hidden="true" />
@@ -122,14 +122,27 @@ export function ThreatSimulator() {
 
       {/* Live Token Dissection */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="pr-sunken p-4 space-y-2.5">
-          <span className="text-xs font-semibold text-[var(--pr-ink-2)] flex items-center gap-1.5">
-            <Sparkles size={13} className="text-[var(--pr-signal)]" aria-hidden="true" />
-            Sanitized Canonical Output
-          </span>
-          <code className="block text-xs pr-mono break-all text-[var(--pr-ink)]">
-            {report.sanitizedUrl || 'BLOCKED -- Rejected before canonicalization'}
-          </code>
+        <div
+          data-allow-dark="true"
+          className="pr-stage-dark p-5 space-y-3 flex flex-col justify-between"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <span className="text-xs font-semibold text-[#c5ccc8] flex items-center gap-1.5">
+                <Sparkles size={13} className="text-[#5fe09e]" aria-hidden="true" />
+                Sanitized Canonical Output
+              </span>
+              <code className="block text-xs pr-mono break-all text-[#f2f1ec] mt-2">
+                {report.sanitizedUrl || 'BLOCKED -- Rejected before canonicalization'}
+              </code>
+            </div>
+            <div className="text-end shrink-0">
+              <div className="text-4xl font-semibold pr-mono leading-none text-[#f2f1ec]">
+                {report.score}
+              </div>
+              <span className="text-[11px] pr-mono text-[#929e98]">SAFETY / 100</span>
+            </div>
+          </div>
 
           <AnimatePresence mode="popLayout">
             {report.strippedParams.length > 0 && (
@@ -137,12 +150,12 @@ export function ThreatSimulator() {
                 initial={reduce ? false : { opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="flex flex-wrap gap-1.5 pt-1"
+                className="flex flex-wrap gap-1.5 pt-2 border-t border-[#243830]"
               >
                 {report.strippedParams.map((param) => (
                   <span
                     key={param}
-                    className="px-2 py-0.5 rounded-[var(--pr-r-sm)] bg-[var(--pr-warn-wash)] border border-[var(--pr-warn-rule)] text-[11px] pr-mono text-[var(--pr-warn)] line-through"
+                    className="px-2 py-0.5 rounded-[var(--pr-r-sm)] bg-[#2b1f0b] border border-[#5e4214] text-[11px] pr-mono text-[#f5b952] line-through"
                   >
                     {param}
                   </span>
@@ -165,13 +178,12 @@ export function ThreatSimulator() {
                 className="p-2.5 rounded-[var(--pr-r-sm)] border border-[var(--pr-rule)] bg-[var(--pr-paper)] flex items-start gap-2.5 text-xs"
               >
                 <span
-                  className={`pr-badge shrink-0 ${
-                    r.severity === 'pass'
+                  className={`pr-badge shrink-0 ${r.severity === 'pass'
                       ? 'pr-badge--good'
                       : r.severity === 'warn'
-                      ? 'pr-badge--warn'
-                      : 'pr-badge--bad'
-                  }`}
+                        ? 'pr-badge--warn'
+                        : 'pr-badge--bad'
+                    }`}
                 >
                   {r.severity}
                 </span>
