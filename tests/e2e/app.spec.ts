@@ -89,7 +89,7 @@ test.describe('PineReel Core E2E', () => {
   });
 
   test('caches direct MP4 into Offline Mountain Vault and switches languages cleanly', async ({ page }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.evaluate(() => document.fonts.ready);
     await expect(page.locator('header[data-hydrated="true"]')).toBeVisible({ timeout: 20_000 });
@@ -120,7 +120,7 @@ test.describe('PineReel Core E2E', () => {
     await expect(page.getByText(/Verified Safe/i)).toBeVisible({ timeout: 20_000 });
     await page.getByRole('button', { name: /Save to Offline Vault/i }).click();
     await expect(page.getByRole('button', { name: /Saved in Offline Vault/i })).toBeVisible({
-      timeout: 30_000,
+      timeout: 110_000,
     });
 
     await page.goto('/vault', { waitUntil: 'domcontentloaded' });

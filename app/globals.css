@@ -360,7 +360,7 @@ body {
 .pr-btn:disabled,
 .pr-btn[aria-disabled='true'] {
   background: var(--pr-sunken);
-  color: var(--pr-ink-4);
+  color: var(--pr-ink-3);
   border-color: var(--pr-rule);
   cursor: not-allowed;
 }
