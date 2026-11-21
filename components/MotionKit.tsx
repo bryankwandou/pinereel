@@ -13,16 +13,14 @@
 import Link from 'next/link';
 import {
   AnimatePresence,
-  animate,
   motion,
-  useInView,
   useMotionValue,
   useReducedMotion,
   useScroll,
   useSpring,
 } from 'framer-motion';
 import { ArrowUpRight } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export function useSafeReducedMotion(): boolean {
   const raw = useReducedMotion();
@@ -303,29 +301,18 @@ export function CountUpMetric({
   prefix?: string;
 }) {
   const reduce = useSafeReducedMotion();
-  const ref = useRef<HTMLSpanElement>(null);
-  const inView = useInView(ref, { once: true, amount: 0.4 });
-  const [display, setDisplay] = useState(value);
-  const startedRef = useRef(false);
-
-  useEffect(() => {
-    if (reduce || !inView || startedRef.current) return;
-    startedRef.current = true;
-    const ctrl = animate(0, value, {
-      duration: 0.65,
-      ease: [0.22, 1, 0.36, 1],
-      onUpdate: (latest) => setDisplay(Math.round(latest)),
-      onComplete: () => setDisplay(value),
-    });
-    return () => ctrl.stop();
-  }, [inView, reduce, value]);
-
   return (
-    <span ref={ref} className="pr-mono">
+    <motion.span
+      initial={reduce ? false : { opacity: 0.65, y: 6 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.4 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="pr-mono inline-block"
+    >
       {prefix}
-      {reduce ? value : display}
+      {value}
       {suffix}
-    </span>
+    </motion.span>
   );
 }
 
@@ -349,7 +336,7 @@ export function StrikeThroughSweep({
           initial={{ scaleX: 0 }}
           animate={{ scaleX: 1 }}
           transition={{ duration: 0.45, delay: delayMs / 1000, ease: [0.22, 1, 0.36, 1] }}
-          className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[3px] origin-left rounded-full pointer-events-none"
+          className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[1.5px] opacity-80 origin-left rounded-full pointer-events-none"
           style={{ background: 'var(--pr-bad)' }}
         />
       )}
@@ -412,14 +399,14 @@ export function LiveSourceFlipper() {
         LIVE SOURCE:
       </span>
       <span className="relative inline-flex items-center min-w-[165px] h-4 overflow-hidden">
-        <AnimatePresence mode="wait">
+        <AnimatePresence initial={false}>
           <motion.span
             key={CYCLING_SOURCES[index]}
             initial={reduce ? false : { y: 14, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={reduce ? undefined : { y: -14, opacity: 0 }}
-            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-            className="pr-mono text-xs font-semibold text-[var(--pr-signal)] whitespace-nowrap"
+            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute inset-y-0 left-0 flex items-center pr-mono text-xs font-semibold text-[var(--pr-signal)] whitespace-nowrap"
           >
             {CYCLING_SOURCES[index]}
           </motion.span>

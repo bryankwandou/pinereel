@@ -1206,10 +1206,11 @@ async function resolveAnyWebVideoPage(
     if (candidateUrls.length >= 6) break;
   }
 
+  const rawTitleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
   const title =
     extractMetaTag(html, 'og:title') ||
     extractMetaTag(html, 'twitter:title') ||
-    html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ||
+    (rawTitleTag ? decodeHtmlEntities(rawTitleTag) : null) ||
     safety.hostname;
 
   const description =
