@@ -121,7 +121,28 @@ export async function inspectAndUnwrapUrl(rawInput: string): Promise<SafetyRepor
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get('location');
         if (!loc) break;
-        const resolved = new URL(loc, target).toString();
+        const resolvedUrl = new URL(loc, target);
+        if (/^\/(login|uas\/login|authwall|checkpoint)(\/|$)/i.test(resolvedUrl.pathname)) {
+          const nextParam =
+            resolvedUrl.searchParams.get('next') ||
+            resolvedUrl.searchParams.get('session_redirect') ||
+            resolvedUrl.searchParams.get('continue');
+          if (
+            nextParam &&
+            /^https?:\/\//i.test(nextParam) &&
+            nextParam !== current &&
+            !chain.includes(nextParam)
+          ) {
+            const nextParsed = new URL(nextParam);
+            if (!/^\/(login|uas\/login|authwall|checkpoint)(\/|$)/i.test(nextParsed.pathname)) {
+              chain.push(nextParam);
+              current = nextParam;
+              continue;
+            }
+          }
+          break;
+        }
+        const resolved = resolvedUrl.toString();
         if (chain.includes(resolved)) break;
         chain.push(resolved);
         current = resolved;
