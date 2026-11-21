@@ -1313,7 +1313,7 @@ async function resolveSearchOrPortalVideoCloud(
         }
       }
 
-      if (!targetVideoUrl && isBingVideos && query.trim()) {
+      if (!targetVideoUrl && query.trim()) {
         const bingSearchHtml = await fetchTextBounded(
           `https://www.bing.com/videos/search?q=${encodeURIComponent(query.trim())}`
         );
