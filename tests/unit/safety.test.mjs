@@ -68,6 +68,12 @@ test('Node v24 checks safety.ts: blocks ads/malware/SSRF without rejecting gener
   assert.equal(xSuffixDomain.verdict, 'SAFE');
   assert.equal(xSuffixDomain.score, 100);
 
+  const plainSearchQuery = mod.sanitizeAndInspectUrl('eh hijau');
+  assert.equal(plainSearchQuery.verdict, 'SAFE');
+  assert.equal(plainSearchQuery.score, 100);
+  assert.equal(plainSearchQuery.kidSafe, true);
+  assert.match(plainSearchQuery.sanitizedUrl, /youtube\.com\/results\?search_query=eh(?:\+|%20)hijau/);
+
   const igLink = mod.sanitizeAndInspectUrl('instagram.com/reel/C8x1234abcd/?igsh=track123');
   assert.equal(igLink.verdict, 'SAFE');
   assert.equal(igLink.sourceType, 'instagram');

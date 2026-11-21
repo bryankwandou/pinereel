@@ -54,8 +54,10 @@ export async function isYtdlpAvailable(): Promise<boolean> {
   return cachedYtdlpAvailable;
 }
 
-function buildProxyUrl(directUrl: string): string {
-  return `/api/stream?url=${encodeURIComponent(directUrl)}`;
+function buildProxyUrl(directUrl: string, sourcePageUrl?: string): string {
+  const params = new URLSearchParams({ url: directUrl });
+  if (sourcePageUrl) params.set('source', sourcePageUrl);
+  return `/api/stream?${params.toString()}`;
 }
 
 function buildDownloadUrl(
@@ -1171,6 +1173,318 @@ async function resolveRedditCloud(url: string, safety: SafetyReport): Promise<Re
   }
 }
 
+async function verifyDirectStreamCandidate(
+  candidateUrl: string,
+  refererPageUrl?: string
+): Promise<boolean> {
+  try {
+    await assertSafeRemoteUrl(candidateUrl);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3800);
+    const headers: Record<string, string> = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    };
+    if (refererPageUrl) {
+      try {
+        const ref = new URL(refererPageUrl);
+        headers.Referer = `${ref.origin}/`;
+      } catch {
+        // ignore
+      }
+    }
+
+    let res = await fetch(candidateUrl, {
+      method: 'HEAD',
+      signal: controller.signal,
+      headers,
+    });
+
+    if (res.status === 405 || res.status === 403 || res.status === 501) {
+      res = await fetch(candidateUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { ...headers, Range: 'bytes=0-511' },
+      });
+      await res.body?.cancel().catch(() => {});
+    }
+    clearTimeout(timer);
+
+    if (!res.ok && res.status !== 206) return false;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (
+      ct.includes('text/html') ||
+      ct.includes('application/json') ||
+      ct.includes('text/plain') ||
+      ct.includes('application/xhtml')
+    ) {
+      return false;
+    }
+    return (
+      ct.startsWith('video/') ||
+      ct.startsWith('audio/') ||
+      ct.includes('mpegurl') ||
+      ct.startsWith('application/octet-stream')
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function resolveSearchOrPortalVideoCloud(
+  url: string,
+  safety: SafetyReport
+): Promise<ResolvedMedia | null> {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    const path = u.pathname.toLowerCase();
+
+    // 1. Bing Videos / Google Video Search / Yahoo Video Search / DuckDuckGo / YouTube Search Results
+    const isBingVideos = host.endsWith('bing.com') && path.startsWith('/videos');
+    const isGoogleSearch =
+      (host.includes('google.') && (path === '/search' || path === '/url' || path === '/imgres')) ||
+      (host.endsWith('youtube.com') && path === '/results');
+    const isYahooVideo = host.includes('yahoo.com') && (host.startsWith('video.') || path.includes('video'));
+    const isYandexVideo = host.includes('yandex.') && path.startsWith('/video');
+    const isDdgSearch = host.endsWith('duckduckgo.com') && u.searchParams.has('q');
+
+    if (isBingVideos || isGoogleSearch || isYahooVideo || isYandexVideo || isDdgSearch) {
+      const directParam =
+        u.searchParams.get('murl') ||
+        u.searchParams.get('purl') ||
+        u.searchParams.get('url') ||
+        u.searchParams.get('ru');
+      if (directParam && /^https?:\/\//i.test(directParam) && directParam !== url) {
+        const subYt = extractYouTubeId(directParam);
+        if (subYt) {
+          return resolveYouTubeCloud(`https://www.youtube.com/watch?v=${subYt}`, safety);
+        }
+      }
+
+      const query =
+        u.searchParams.get('q') ||
+        u.searchParams.get('search_query') ||
+        u.searchParams.get('p') ||
+        u.searchParams.get('text') ||
+        '';
+      const mid = u.searchParams.get('mid') || '';
+
+      let targetVideoUrl: string | null = null;
+
+      // If Bing Video has a specific mid, inspect Bing HTML for the matching mid's murl/purl
+      if (isBingVideos) {
+        const bingHtml = await fetchTextBounded(url);
+        const decoded = (bingHtml || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+        if (mid) {
+          const midIdx = decoded.indexOf(mid);
+          if (midIdx !== -1) {
+            const windowSlice = decoded.slice(Math.max(0, midIdx - 600), midIdx + 900);
+            const murlMatch =
+              windowSlice.match(/"murl"\s*:\s*"(https?:\/\/[^"]+)"/) ||
+              windowSlice.match(/"purl"\s*:\s*"(https?:\/\/[^"]+)"/);
+            if (murlMatch?.[1]) targetVideoUrl = murlMatch[1];
+          }
+        }
+        if (!targetVideoUrl && decoded) {
+          const firstMurl =
+            decoded.match(/"murl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ||
+            decoded.match(/"purl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1];
+          if (firstMurl && extractYouTubeId(firstMurl) && !query) {
+            targetVideoUrl = firstMurl;
+          }
+        }
+      }
+
+      // Resolve search query directly against YouTube search to obtain the exact ad-free video ID
+      // (bypasses Bing/MSN pre-roll ads such as Shopee.Co.Id completely!)
+      if (!targetVideoUrl && query.trim()) {
+        const ytSearchHtml = await fetchTextBounded(
+          `https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}`
+        );
+        const topVidId = ytSearchHtml?.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/)?.[1];
+        if (topVidId) {
+          targetVideoUrl = `https://www.youtube.com/watch?v=${topVidId}`;
+        }
+      }
+
+      if (!targetVideoUrl && isBingVideos && query.trim()) {
+        const bingSearchHtml = await fetchTextBounded(
+          `https://www.bing.com/videos/search?q=${encodeURIComponent(query.trim())}`
+        );
+        const decodedSearch = (bingSearchHtml || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+        targetVideoUrl =
+          decodedSearch.match(/"murl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ||
+          decodedSearch.match(/"purl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ||
+          null;
+      }
+
+      if (targetVideoUrl) {
+        const ytId = extractYouTubeId(targetVideoUrl);
+        if (ytId) {
+          const resolvedYt = await resolveYouTubeCloud(
+            `https://www.youtube.com/watch?v=${ytId}`,
+            safety
+          );
+          if (resolvedYt) {
+            return {
+              ...resolvedYt,
+              offlineNote:
+                'Unwrapped search engine video wrapper and stripped pre-roll ads (Shopee / Bing Ads bypassed).',
+            };
+          }
+        }
+        const dmId = extractDailymotionId(targetVideoUrl);
+        if (dmId) {
+          return resolveDailymotionCloud(targetVideoUrl, safety);
+        }
+        const ttId = extractTikTokId(targetVideoUrl);
+        if (ttId) {
+          return resolveTikTokCloud(targetVideoUrl, safety);
+        }
+        const vmId = extractVimeoId(targetVideoUrl);
+        if (vmId) {
+          return resolveVimeoCloud(targetVideoUrl, safety);
+        }
+      }
+    }
+
+    // 2. Facebook Video / Reel / Watch
+    if (
+      host === 'facebook.com' ||
+      host.endsWith('.facebook.com') ||
+      host === 'fb.watch' ||
+      host === 'fb.com'
+    ) {
+      const fbHtml = await fetchTextBounded(url);
+      const variants: MediaStreamVariant[] = [];
+      const title =
+        (fbHtml && (extractMetaTag(fbHtml, 'og:title') || extractMetaTag(fbHtml, 'twitter:title'))) ||
+        'Facebook Video';
+      const thumb = (fbHtml && extractMetaTag(fbHtml, 'og:image')) || null;
+
+      if (fbHtml) {
+        const hdMatch =
+          fbHtml.match(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/) ||
+          fbHtml.match(/"browser_native_hd_url"\s*:\s*"([^"]+)"/);
+        const sdMatch =
+          fbHtml.match(/"playable_url"\s*:\s*"([^"]+)"/) ||
+          fbHtml.match(/"browser_native_sd_url"\s*:\s*"([^"]+)"/);
+        for (const [label, raw] of [
+          ['HD MP4', hdMatch?.[1]],
+          ['SD MP4', sdMatch?.[1]],
+        ] as const) {
+          if (raw) {
+            const clean = raw.replace(/\\u0025/g, '%').replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+            if (/^https?:\/\//i.test(clean)) {
+              variants.push({
+                id: `fb-${variants.length}`,
+                label,
+                ext: 'mp4',
+                url: clean,
+                proxyUrl: buildProxyUrl(clean, url),
+                downloadUrl: buildDownloadUrl(clean, title, 'mp4', url),
+                qualityHeight: label === 'HD MP4' ? 720 : 360,
+                hasAudio: true,
+                hasVideo: true,
+                filesizeBytes: null,
+                mimeType: 'video/mp4',
+                isHls: false,
+              });
+            }
+          }
+        }
+      }
+
+      const preferred = variants[0] ?? null;
+      return {
+        ok: true,
+        engine: 'cloud-extractor',
+        safety,
+        title,
+        author: 'Facebook Video',
+        durationSeconds: null,
+        thumbnailUrl: thumb,
+        streams: variants,
+        preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+        privacyEmbedUrl: `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(
+          url
+        )}&show_text=false`,
+        offlineCapable: variants.length > 0,
+        offlineNote: 'Isolated Facebook video player active without surrounding feed ads.',
+        ytdlpAvailable: await isYtdlpAvailable(),
+      };
+    }
+
+    // 3. Pinterest Video Pins
+    if (host.includes('pinterest.') || host === 'pin.it') {
+      const pinHtml = await fetchTextBounded(url);
+      if (pinHtml) {
+        const pinMp4 = pinHtml.match(/https:\/\/v1\.pinimg\.com\/videos\/[^\s"'<>\\]+\.mp4/i)?.[0];
+        if (pinMp4) {
+          const title = extractMetaTag(pinHtml, 'og:title') || 'Pinterest Video';
+          const thumb = extractMetaTag(pinHtml, 'og:image') || null;
+          const variant: MediaStreamVariant = {
+            id: 'pin-mp4',
+            label: 'Direct MP4',
+            ext: 'mp4',
+            url: pinMp4,
+            proxyUrl: buildProxyUrl(pinMp4, url),
+            downloadUrl: buildDownloadUrl(pinMp4, title, 'mp4', url),
+            qualityHeight: 720,
+            hasAudio: true,
+            hasVideo: true,
+            filesizeBytes: null,
+            mimeType: 'video/mp4',
+            isHls: false,
+          };
+          return {
+            ok: true,
+            engine: 'cloud-extractor',
+            safety,
+            title,
+            author: 'Pinterest',
+            durationSeconds: null,
+            thumbnailUrl: thumb,
+            streams: [variant],
+            preferredStreamUrl: variant.proxyUrl,
+            privacyEmbedUrl: null,
+            offlineCapable: true,
+            offlineNote: 'Direct Pinterest MP4 extracted for ad-free playback and offline vault.',
+            ytdlpAvailable: await isYtdlpAvailable(),
+          };
+        }
+      }
+    }
+
+    // 4. Bilibili Video
+    if (host.endsWith('bilibili.com')) {
+      const bvid = u.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/i)?.[1];
+      if (bvid) {
+        return {
+          ok: true,
+          engine: 'cloud-extractor',
+          safety,
+          title: `Bilibili Video (${bvid})`,
+          author: 'Bilibili',
+          durationSeconds: null,
+          thumbnailUrl: null,
+          streams: [],
+          preferredStreamUrl: null,
+          privacyEmbedUrl: `https://player.bilibili.com/player.html?bvid=${bvid}&high_quality=1&autoplay=1`,
+          offlineCapable: await isYtdlpAvailable(),
+          offlineNote: 'Isolated Bilibili player active without page popups.',
+          ytdlpAvailable: await isYtdlpAvailable(),
+        };
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveAnyWebVideoPage(
   url: string,
   safety: SafetyReport,
@@ -1233,9 +1547,24 @@ async function resolveAnyWebVideoPage(
     if (!/^https?:/i.test(resolved) || seen.has(resolved)) continue;
     seen.add(resolved);
 
+    // If og:video or contentUrl points to a YouTube video, resolve it via our ad-free YouTube extractor
+    const embeddedYtId = extractYouTubeId(resolved);
+    if (embeddedYtId) {
+      const ytResolved = await resolveYouTubeCloud(
+        `https://www.youtube.com/watch?v=${embeddedYtId}`,
+        updatedSafety
+      );
+      if (ytResolved) return ytResolved;
+    }
+
     const isHls = /\.m3u8(\?|#|$)/i.test(resolved);
     const isDirectStream = isHls || /\.(mp4|webm|m4v|mov)(\?|#|$)/i.test(resolved);
-    if (!isDirectStream && rawCandidate !== metaVid) continue;
+    if (!isDirectStream) continue;
+
+    // Verify that the direct stream candidate actually responds with a valid media Content-Type
+    // (prevents dead 0:00 <video> boxes and 415 download.json errors!)
+    const playable = await verifyDirectStreamCandidate(resolved, url);
+    if (!playable) continue;
 
     const ext = isHls ? 'm3u8' : resolved.match(/\.(webm|m4v|mov)/i)?.[1]?.toLowerCase() ?? 'mp4';
     variants.push({
@@ -1243,7 +1572,7 @@ async function resolveAnyWebVideoPage(
       label: isHls ? 'HLS Stream' : `Direct ${ext.toUpperCase()}`,
       ext,
       url: resolved,
-      proxyUrl: buildProxyUrl(resolved),
+      proxyUrl: buildProxyUrl(resolved, url),
       downloadUrl: buildDownloadUrl(resolved, title, ext, url),
       qualityHeight: null,
       hasAudio: true,
@@ -1384,6 +1713,10 @@ export async function resolveVideoSource(rawUrl: string): Promise<ResolvedMedia>
     const arch = await resolveArchiveOrg(cleanUrl, safety);
     if (arch) return arch;
   }
+
+  const searchOrPortal = await resolveSearchOrPortalVideoCloud(cleanUrl, safety);
+  if (searchOrPortal) return searchOrPortal;
+
   if (safety.sourceType === 'youtube') {
     const yt = await resolveYouTubeCloud(cleanUrl, safety);
     if (yt) return yt;

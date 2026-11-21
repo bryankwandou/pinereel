@@ -69,6 +69,7 @@ export function VideoWorkbench({
   const [scanStep, setScanStep] = useState(0);
   const [ytdlpReady, setYtdlpReady] = useState<boolean | null>(null);
   const [useServerProxy, setUseServerProxy] = useState(false);
+  const [streamFailed, setStreamFailed] = useState(false);
 
   const livePreview = useMemo(() => {
     const trimmed = urlInput.trim();
@@ -111,6 +112,7 @@ export function VideoWorkbench({
     setSavedVaultId(null);
     setVaultError(null);
     setUseServerProxy(false);
+    setStreamFailed(false);
     setTxPhase({ kind: 'idle' });
 
     try {
@@ -152,7 +154,22 @@ export function VideoWorkbench({
     return resolved.streams.find((s) => s.id === selectedVariantId) ?? resolved.streams[0];
   }, [resolved, selectedVariantId]);
 
-  const streamSrc = activeVariant ? activeVariant.proxyUrl : resolved?.preferredStreamUrl ?? null;
+  const streamSrc = streamFailed
+    ? null
+    : activeVariant
+    ? activeVariant.proxyUrl
+    : resolved?.preferredStreamUrl ?? null;
+
+  const handleVideoError = useCallback(() => {
+    if (resolved?.streams && resolved.streams.length > 1 && activeVariant) {
+      const idx = resolved.streams.findIndex((s) => s.id === activeVariant.id);
+      if (idx >= 0 && idx + 1 < resolved.streams.length) {
+        setSelectedVariantId(resolved.streams[idx + 1].id);
+        return;
+      }
+    }
+    setStreamFailed(true);
+  }, [resolved, activeVariant]);
 
   // Bind HTML5 video + optional HLS.js safely without third-party scripts
   useEffect(() => {
@@ -564,6 +581,7 @@ export function VideoWorkbench({
                       playsInline
                       preload="metadata"
                       poster={resolved.thumbnailUrl || undefined}
+                      onError={handleVideoError}
                       className="w-full h-full object-contain block"
                     />
                   ) : resolved.privacyEmbedUrl ? (
@@ -674,10 +692,10 @@ export function VideoWorkbench({
                       </button>
                     )}
 
-                    {(activeVariant || resolved.ytdlpAvailable) && (
+                    {((activeVariant && !streamFailed) || resolved.ytdlpAvailable) && (
                       <a
                         href={
-                          activeVariant
+                          activeVariant && !streamFailed
                             ? activeVariant.downloadUrl
                             : `/api/download?source=${encodeURIComponent(resolved.safety.sanitizedUrl)}&filename=${encodeURIComponent(
                                 `${resolved.title.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 48)}.mp4`

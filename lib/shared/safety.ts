@@ -119,6 +119,10 @@ export function normalizeUserUrlInput(rawInput: string): string {
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
     return trimmed;
   }
+  // If user enters a plain search phrase (contains spaces or has no domain dot), treat as ad-free video search
+  if (/\s/.test(trimmed) || !trimmed.includes('.')) {
+    return `https://www.youtube.com/results?search_query=${encodeURIComponent(trimmed)}`;
+  }
   return `https://${trimmed}`;
 }
 

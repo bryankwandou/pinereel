@@ -70,6 +70,16 @@ test.describe('PineReel Core E2E', () => {
     expect(sonaBody.safety.score).toBe(100);
     expect(sonaBody.privacyEmbedUrl).toBe('https://sonacast-ten.vercel.app/favorites');
 
+    // Bing Videos search URL unwraps to ad-free youtube-nocookie embed (bypassing Bing/Shopee pre-roll ads)
+    const bingRes = await request.post('/api/resolve', {
+      data: { url: 'https://www.bing.com/videos/search?q=eh+hijau' },
+    });
+    expect(bingRes.status()).toBe(200);
+    const bingBody = await bingRes.json();
+    expect(bingBody.ok).toBe(true);
+    expect(bingBody.safety.verdict).toBe('SAFE');
+    expect(bingBody.privacyEmbedUrl).toContain('youtube-nocookie.com/embed/');
+
     // TikTok direct MP4 extraction
     const ttRes = await request.post('/api/resolve', {
       data: { url: 'https://www.tiktok.com/@scout2015/video/6718335390845095173' },
