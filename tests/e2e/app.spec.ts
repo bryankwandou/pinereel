@@ -81,6 +81,23 @@ test.describe('PineReel Core E2E', () => {
     expect(Boolean(bingBody.preferredStreamUrl || bingBody.privacyEmbedUrl)).toBe(true);
     expect(bingBody.privacyEmbedUrl || '').not.toContain('bing.com');
 
+    // LinkedIn, X, Threads, Facebook, and obscure websites all resolve with ok: true and login-free/ad-free player URLs
+    for (const socialUrl of [
+      'https://www.linkedin.com/posts/satyanadella_ai-cloud-activity-7185638492018294784-abcd',
+      'https://x.com/NASA/status/20',
+      'https://www.threads.net/@mosseri/post/C8x1234abcd',
+      'https://www.facebook.com/facebook/videos/10153231379946729/',
+      'https://unknown-elderly-portal.example.org/watch/ceramah-pagi',
+    ]) {
+      const sRes = await request.post('/api/resolve', { data: { url: socialUrl } });
+      expect(sRes.status()).toBe(200);
+      const sBody = await sRes.json();
+      expect(sBody.ok).toBe(true);
+      expect(sBody.safety.verdict).toBe('SAFE');
+      expect(sBody.safety.kidSafe).toBe(true);
+      expect(Boolean(sBody.preferredStreamUrl || sBody.privacyEmbedUrl)).toBe(true);
+    }
+
     // TikTok direct MP4 extraction
     const ttRes = await request.post('/api/resolve', {
       data: { url: 'https://www.tiktok.com/@scout2015/video/6718335390845095173' },

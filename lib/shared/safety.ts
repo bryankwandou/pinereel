@@ -3,6 +3,9 @@ export type SourcePlatform =
   | 'x'
   | 'instagram'
   | 'tiktok'
+  | 'threads'
+  | 'linkedin'
+  | 'facebook'
   | 'reddit'
   | 'vimeo'
   | 'dailymotion'
@@ -111,6 +114,8 @@ const SHORTENER_HOSTS = new Set([
   'vt.tiktok.com',
   'dai.ly',
   'fb.watch',
+  'lnkd.in',
+  'pin.it',
 ]);
 
 export function normalizeUserUrlInput(rawInput: string): string {
@@ -187,6 +192,15 @@ export function detectSourcePlatform(parsed: URL): SourcePlatform {
   }
   if (host === 'tiktok.com' || host.endsWith('.tiktok.com')) {
     return 'tiktok';
+  }
+  if (host === 'threads.net' || host.endsWith('.threads.net') || host === 'threads.com' || host.endsWith('.threads.com')) {
+    return 'threads';
+  }
+  if (host === 'linkedin.com' || host.endsWith('.linkedin.com') || host === 'lnkd.in') {
+    return 'linkedin';
+  }
+  if (host === 'facebook.com' || host.endsWith('.facebook.com') || host === 'fb.watch' || host === 'fb.com') {
+    return 'facebook';
   }
   if (host === 'reddit.com' || host.endsWith('.reddit.com') || host === 'redd.it' || host === 'v.redd.it') {
     return 'reddit';

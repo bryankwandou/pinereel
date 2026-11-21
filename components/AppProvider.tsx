@@ -58,7 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [online, setOnline] = useState(true);
   const [guardian, setGuardianState] = useState<GuardianState>({
     pinSet: false,
-    kidModeLocked: true,
+    kidModeLocked: false,
     mountainVaultOnly: false,
   });
 

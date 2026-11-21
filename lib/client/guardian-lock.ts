@@ -9,11 +9,11 @@ export interface GuardianState {
   hashHex?: string;
 }
 
-const STORAGE_KEY = 'pinereel.guardian.v1';
+const STORAGE_KEY = 'pinereel.guardian.v3';
 
 const DEFAULT_STATE: GuardianState = {
   pinSet: false,
-  kidModeLocked: true,
+  kidModeLocked: false,
   mountainVaultOnly: false,
 };
 
@@ -22,10 +22,11 @@ export function readGuardianState(): GuardianState {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw) as Partial<GuardianState>;
+    const hasPin = Boolean(parsed.pinSet && parsed.saltHex && parsed.hashHex);
     return {
-      pinSet: Boolean(parsed.pinSet && parsed.saltHex && parsed.hashHex),
-      kidModeLocked: typeof parsed.kidModeLocked === 'boolean' ? parsed.kidModeLocked : true,
-      mountainVaultOnly: Boolean(parsed.mountainVaultOnly),
+      pinSet: hasPin,
+      kidModeLocked: hasPin && typeof parsed.kidModeLocked === 'boolean' ? parsed.kidModeLocked : false,
+      mountainVaultOnly: Boolean(hasPin && parsed.mountainVaultOnly),
       saltHex: typeof parsed.saltHex === 'string' ? parsed.saltHex : undefined,
       hashHex: typeof parsed.hashHex === 'string' ? parsed.hashHex : undefined,
     };

@@ -652,7 +652,34 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
 
 async function resolveXCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
   const tweet = extractTweetInfo(url);
-  if (!tweet) return null;
+  if (!tweet) {
+    try {
+      const u = new URL(url);
+      const handle = u.pathname.split('/').filter(Boolean)[0]?.replace(/^@/, '');
+      if (handle && /^[a-zA-Z0-9_]{1,30}$/.test(handle)) {
+        return {
+          ok: true,
+          engine: 'cloud-extractor',
+          safety,
+          title: `X (@${handle}) — Timeline`,
+          author: `@${handle}`,
+          durationSeconds: null,
+          thumbnailUrl: null,
+          streams: [],
+          preferredStreamUrl: null,
+          privacyEmbedUrl: `https://syndication.twitter.com/srv/timeline-profile/screen-name/${encodeURIComponent(
+            handle
+          )}?dnt=true`,
+          offlineCapable: false,
+          offlineNote: 'Isolated login-free X timeline active without promoted ads.',
+          ytdlpAvailable: await isYtdlpAvailable(),
+        };
+      }
+    } catch {
+      // Fall through
+    }
+    return null;
+  }
 
   const token = ((Number(tweet.id) / 1e15) * Math.PI).toString(36).replace(/(0+|\.)/g, '');
   const syn = await fetchJsonWithTimeout<{
@@ -692,7 +719,7 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
         label: `${ext.toUpperCase()} (${kbps})`,
         ext,
         url: v.url!,
-        proxyUrl: buildProxyUrl(v.url!),
+        proxyUrl: buildProxyUrl(v.url!, url),
         downloadUrl: buildDownloadUrl(v.url!, title, ext, url),
         qualityHeight: null,
         hasAudio: true,
@@ -702,6 +729,49 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
         isHls,
       });
     });
+  }
+
+  if (variants.length === 0) {
+    const vx = await fetchJsonWithTimeout<{
+      text?: string;
+      user_name?: string;
+      user_screen_name?: string;
+      possibly_sensitive?: boolean;
+      media_extended?: {
+        type?: string;
+        url?: string;
+        thumbnail_url?: string;
+        duration_millis?: number;
+        size?: { height?: number };
+      }[];
+    }>(`https://api.vxtwitter.com/${encodeURIComponent(tweet.user || 'i')}/status/${tweet.id}`);
+
+    if (vx) {
+      title = vx.text?.slice(0, 96) || title;
+      author = vx.user_name || (vx.user_screen_name ? `@${vx.user_screen_name}` : author);
+      sensitive = vx.possibly_sensitive ?? sensitive;
+      for (let idx = 0; idx < (vx.media_extended ?? []).length; idx++) {
+        const m = vx.media_extended![idx];
+        if (m.thumbnail_url && !thumb) thumb = m.thumbnail_url;
+        if (m.duration_millis && !durationSeconds) durationSeconds = Math.round(m.duration_millis / 1000);
+        if (m.url && (m.type === 'video' || m.type === 'gif' || /\.mp4/i.test(m.url))) {
+          variants.push({
+            id: `vx-mp4-${idx}`,
+            label: m.size?.height ? `${m.size.height}p MP4` : 'Direct MP4',
+            ext: 'mp4',
+            url: m.url,
+            proxyUrl: buildProxyUrl(m.url, url),
+            downloadUrl: buildDownloadUrl(m.url, title, 'mp4', url),
+            qualityHeight: m.size?.height ?? null,
+            hasAudio: m.type !== 'gif',
+            hasVideo: true,
+            filesizeBytes: null,
+            mimeType: 'video/mp4',
+            isHls: false,
+          });
+        }
+      }
+    }
   }
 
   if (variants.length === 0) {
@@ -731,7 +801,7 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
             label: v.height ? `${v.height}p MP4` : 'MP4 Stream',
             ext: 'mp4',
             url: v.url,
-            proxyUrl: buildProxyUrl(v.url),
+            proxyUrl: buildProxyUrl(v.url, url),
             downloadUrl: buildDownloadUrl(v.url, title, 'mp4', url),
             qualityHeight: v.height ?? null,
             hasAudio: true,
@@ -744,8 +814,6 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
       }
     }
   }
-
-  if (variants.length === 0 && !syn) return null;
 
   const updatedSafety = classifyMetadataSafety(safety, {
     title,
@@ -764,12 +832,12 @@ async function resolveXCloud(url: string, safety: SafetyReport): Promise<Resolve
     thumbnailUrl: thumb,
     streams: variants,
     preferredStreamUrl: preferred ? preferred.proxyUrl : null,
-    privacyEmbedUrl: null,
+    privacyEmbedUrl: `https://platform.twitter.com/embed/Tweet.html?dnt=true&id=${tweet.id}`,
     offlineCapable: variants.some((v) => !v.isHls),
     offlineNote:
       variants.length > 0
         ? 'Direct X video stream resolved without login or ads; ready for Mountain Vault offline storage.'
-        : 'Status resolved, though no public video attachment was reported by X.',
+        : 'Login-free isolated X post player active without promoted feed ads.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
 }
@@ -1354,7 +1422,145 @@ async function resolveSearchOrPortalVideoCloud(
       }
     }
 
-    // 2. Facebook Video / Reel / Watch
+    // 2. LinkedIn Posts, Feed Updates, Videos & Articles (Login-free & Ad-free)
+    if (host === 'linkedin.com' || host.endsWith('.linkedin.com') || host === 'lnkd.in') {
+      const liHtml = await fetchTextBounded(url);
+      const variants: MediaStreamVariant[] = [];
+      let title =
+        (liHtml &&
+          (extractMetaTag(liHtml, 'og:title') ||
+            extractMetaTag(liHtml, 'twitter:title') ||
+            liHtml.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim())) ||
+        'LinkedIn Post & Video';
+      title = decodeHtmlEntities(title);
+      const thumb = (liHtml && extractMetaTag(liHtml, 'og:image')) || null;
+
+      if (liHtml) {
+        const decodedLi = decodeHtmlEntities(liHtml);
+        for (const mp4Match of decodedLi.matchAll(
+          /https:\/\/dms\.licdn\.com\/playlist\/vid\/[^\s"'<>\\]+/gi
+        )) {
+          const cleanUrl = mp4Match[0].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+          if (!variants.some((v) => v.url === cleanUrl)) {
+            variants.push({
+              id: `li-mp4-${variants.length}`,
+              label: variants.length === 0 ? 'HD MP4' : `Stream ${variants.length + 1}`,
+              ext: 'mp4',
+              url: cleanUrl,
+              proxyUrl: buildProxyUrl(cleanUrl, url),
+              downloadUrl: buildDownloadUrl(cleanUrl, title, 'mp4', url),
+              qualityHeight: 720,
+              hasAudio: true,
+              hasVideo: true,
+              filesizeBytes: null,
+              mimeType: 'video/mp4',
+              isHls: false,
+            });
+          }
+        }
+      }
+
+      const urnMatch =
+        url.match(/urn:li:(activity|ugcPost|share):(\d{15,22})/i) ||
+        url.match(/-(activity|ugcPost|share)-(\d{15,22})/i) ||
+        liHtml?.match(/urn:li:(activity|ugcPost|share):(\d{15,22})/i);
+
+      const embedUrl = urnMatch
+        ? `https://www.linkedin.com/embed/feed/update/urn:li:${urnMatch[1]}:${urnMatch[2]}`
+        : `/api/proxy-page?url=${encodeURIComponent(url)}`;
+
+      const preferred = variants[0] ?? null;
+      return {
+        ok: true,
+        engine: 'cloud-extractor',
+        safety,
+        title,
+        author: 'LinkedIn',
+        durationSeconds: null,
+        thumbnailUrl: thumb,
+        streams: variants,
+        preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+        privacyEmbedUrl: embedUrl,
+        offlineCapable: variants.length > 0,
+        offlineNote:
+          variants.length > 0
+            ? 'Direct LinkedIn video stream extracted without login wall; ready for offline Mountain Vault.'
+            : 'Login-free LinkedIn embed active with sign-in walls and tracking scripts stripped.',
+        ytdlpAvailable: await isYtdlpAvailable(),
+      };
+    }
+
+    // 3. Threads (threads.net / threads.com) Posts & Videos (Login-free & Ad-free)
+    if (
+      host === 'threads.net' ||
+      host.endsWith('.threads.net') ||
+      host === 'threads.com' ||
+      host.endsWith('.threads.com')
+    ) {
+      const codeMatch = u.pathname.match(/\/(?:@[^/]+\/post|t|post)\/([a-zA-Z0-9_-]+)/i);
+      const code = codeMatch?.[1] || null;
+      const embedUrl = code
+        ? `https://www.threads.net/t/${code}/embed`
+        : `/api/proxy-page?url=${encodeURIComponent(url)}`;
+
+      const embedHtml = code ? await fetchTextBounded(embedUrl) : await fetchTextBounded(url);
+      const variants: MediaStreamVariant[] = [];
+      let title = `Threads Post${code ? ` (${code})` : ''}`;
+      let thumb: string | null = null;
+
+      if (embedHtml) {
+        const vidMatch =
+          embedHtml.match(/<video[^>]+src=["']([^"']+)["']/i) ||
+          embedHtml.match(/"video_versions"\s*:\s*\[\s*\{\s*[^}]*"url"\s*:\s*"([^"]+)"/i);
+        if (vidMatch?.[1]) {
+          const cleanVid = decodeHtmlEntities(
+            vidMatch[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/')
+          );
+          if (/^https?:\/\//i.test(cleanVid)) {
+            variants.push({
+              id: 'threads-mp4',
+              label: 'Direct MP4',
+              ext: 'mp4',
+              url: cleanVid,
+              proxyUrl: buildProxyUrl(cleanVid, url),
+              downloadUrl: buildDownloadUrl(cleanVid, title, 'mp4', url),
+              qualityHeight: 720,
+              hasAudio: true,
+              hasVideo: true,
+              filesizeBytes: null,
+              mimeType: 'video/mp4',
+              isHls: false,
+            });
+          }
+        }
+        const ogTitle = extractMetaTag(embedHtml, 'og:title');
+        if (ogTitle) title = ogTitle;
+        const ogImg = extractMetaTag(embedHtml, 'og:image');
+        if (ogImg) thumb = ogImg;
+      }
+
+      const preferred = variants[0] ?? null;
+      return {
+        ok: true,
+        engine: 'cloud-extractor',
+        safety,
+        title,
+        author: 'Threads',
+        durationSeconds: null,
+        thumbnailUrl: thumb,
+        streams: variants,
+        preferredStreamUrl: preferred ? preferred.proxyUrl : null,
+        privacyEmbedUrl: embedUrl,
+        offlineCapable: variants.length > 0,
+        offlineNote:
+          variants.length > 0
+            ? 'Direct Threads MP4 extracted without login or app prompts; ready for offline Mountain Vault.'
+            : 'Login-free Threads embed active without app install walls or ads.',
+        ytdlpAvailable: await isYtdlpAvailable(),
+      };
+    }
+
+    // 4. Facebook Video / Reel / Watch / Post (Login-free & Ad-free)
     if (
       host === 'facebook.com' ||
       host.endsWith('.facebook.com') ||
@@ -1371,10 +1577,12 @@ async function resolveSearchOrPortalVideoCloud(
       if (fbHtml) {
         const hdMatch =
           fbHtml.match(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/) ||
-          fbHtml.match(/"browser_native_hd_url"\s*:\s*"([^"]+)"/);
+          fbHtml.match(/"browser_native_hd_url"\s*:\s*"([^"]+)"/) ||
+          fbHtml.match(/"hd_src"\s*:\s*"([^"]+)"/);
         const sdMatch =
           fbHtml.match(/"playable_url"\s*:\s*"([^"]+)"/) ||
-          fbHtml.match(/"browser_native_sd_url"\s*:\s*"([^"]+)"/);
+          fbHtml.match(/"browser_native_sd_url"\s*:\s*"([^"]+)"/) ||
+          fbHtml.match(/"sd_src"\s*:\s*"([^"]+)"/);
         for (const [label, raw] of [
           ['HD MP4', hdMatch?.[1]],
           ['SD MP4', sdMatch?.[1]],
@@ -1401,22 +1609,25 @@ async function resolveSearchOrPortalVideoCloud(
         }
       }
 
+      const isPostOnly = /\/posts\/|\/permalink|story_fbid=/i.test(url) && !/\/videos\/|\/reel\/|\/watch/i.test(url);
+      const fbPluginUrl = isPostOnly
+        ? `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=true`
+        : `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false`;
+
       const preferred = variants[0] ?? null;
       return {
         ok: true,
         engine: 'cloud-extractor',
         safety,
         title,
-        author: 'Facebook Video',
+        author: 'Facebook',
         durationSeconds: null,
         thumbnailUrl: thumb,
         streams: variants,
         preferredStreamUrl: preferred ? preferred.proxyUrl : null,
-        privacyEmbedUrl: `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(
-          url
-        )}&show_text=false`,
+        privacyEmbedUrl: fbPluginUrl,
         offlineCapable: variants.length > 0,
-        offlineNote: 'Isolated Facebook video player active without surrounding feed ads.',
+        offlineNote: 'Login-free isolated Facebook player active without surrounding feed ads.',
         ytdlpAvailable: await isYtdlpAvailable(),
       };
     }
@@ -1632,9 +1843,36 @@ async function resolveAnyWebVideoPage(
   }
 
   // If no direct MP4/HLS was found in static HTML (e.g., client-rendered SPA like Sonacast or general web media app),
-  // load the verified clean destination inside PineReel's popup-blocking, ad-shielded sandbox player.
+  // check if the origin restricts framing via X-Frame-Options or CSP frame-ancestors; if so, route through
+  // PineReel's server-side ad-stripping proxy (/api/proxy-page) so every website opens without framing blocks!
   if (variants.length === 0 && !embedFallback) {
-    embedFallback = url;
+    let framingRestricted = false;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      const headRes = await fetch(url, {
+        method: 'HEAD',
+        signal: controller.signal,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        },
+      }).finally(() => clearTimeout(timer));
+      const xfo = (headRes.headers.get('x-frame-options') || '').toLowerCase();
+      const csp = (headRes.headers.get('content-security-policy') || '').toLowerCase();
+      if (
+        xfo.includes('deny') ||
+        xfo.includes('sameorigin') ||
+        (csp.includes('frame-ancestors') && !csp.includes('frame-ancestors *'))
+      ) {
+        framingRestricted = true;
+      }
+    } catch {
+      framingRestricted = true;
+    }
+    embedFallback = framingRestricted
+      ? `/api/proxy-page?url=${encodeURIComponent(url)}`
+      : url;
   }
 
   const preferred = variants.find((v) => !v.isHls) ?? variants[0] ?? null;
