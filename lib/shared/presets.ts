@@ -4,7 +4,7 @@ export interface CuratedSample {
   sourceLabel: string;
   url: string;
   description: string;
-  expectedKind: 'direct' | 'youtube' | 'x' | 'tiktok' | 'blocked';
+  expectedKind: 'direct' | 'youtube' | 'x' | 'tiktok' | 'web' | 'blocked';
 }
 
 export const CURATED_SAMPLES: CuratedSample[] = [
@@ -41,11 +41,19 @@ export const CURATED_SAMPLES: CuratedSample[] = [
     expectedKind: 'tiktok',
   },
   {
-    id: 'blocked-lure',
-    label: 'Blocked Ad Malware (.apk)',
-    sourceLabel: 'Ad Shield',
-    url: 'https://ads.doubleclick.net/slot-gacor-bonus.apk',
-    description: 'Demonstrates blocking standalone ad networks and executable malware lures.',
-    expectedKind: 'blocked',
+    id: 'ad-wrapped-yt',
+    label: 'Ad-Wrapped Link (Strips Ad -> Plays Video)',
+    sourceLabel: 'Ad Stripper',
+    url: 'https://ads.doubleclick.net/clk?adurl=https://www.youtube.com/watch?v=aqz-KE-bpKQ&fbclid=ad99',
+    description: 'Strips the DoubleClick ad server wrapper and plays the underlying clean video without blocking it.',
+    expectedKind: 'youtube',
+  },
+  {
+    id: 'sonacast-web',
+    label: 'Sonacast Stream (General Web App)',
+    sourceLabel: 'Web App Sandbox',
+    url: 'https://sonacast-ten.vercel.app/favorites',
+    description: 'Loads general web streaming apps inside an ad-shielded, popup-blocked sandbox player.',
+    expectedKind: 'web',
   },
 ];

@@ -91,9 +91,9 @@ export default function DemoRecordPage() {
         targetsRef.current.get('save-vault-btn')?.click();
         await wait(3800);
 
-        setCaption('Step 4: Threat shield blocks gambling and APK phishing lures');
-        await clickTarget('sample-blocked-lure');
-        targetsRef.current.get('sample-blocked-lure')?.click();
+        setCaption('Step 4: Stripping DoubleClick ad wrapper while playing the underlying video');
+        await clickTarget('sample-ad-wrapped-yt');
+        targetsRef.current.get('sample-ad-wrapped-yt')?.click();
         await wait(2400);
       } finally {
         window.__demoDone = true;

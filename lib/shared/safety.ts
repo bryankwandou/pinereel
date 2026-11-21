@@ -478,7 +478,7 @@ export function sanitizeAndInspectUrl(
     });
   }
 
-  if (/(youtube\.com|instagram\.com|twitter\.com|x\.com)\.[^/]+/i.test(hostLower)) {
+  if (/(?:^|\.)(youtube\.com|instagram\.com|twitter\.com)\.[a-z0-9.-]+$/i.test(hostLower)) {
     score -= 80;
     reasons.push({
       code: 'DOMAIN_SPOOFING',

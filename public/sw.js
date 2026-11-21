@@ -1,5 +1,5 @@
-const CACHE_NAME = 'pinereel-shell-v1';
-const SHELL_ROUTES = ['/', '/vault', '/watch', '/ledger', '/deck'];
+const CACHE_NAME = 'pinereel-shell-v3';
+const SHELL_ROUTES = ['/vault'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(req)
       .then((res) => {
-        if (res && res.status === 200 && res.type === 'basic') {
+        if (res && res.status === 200 && res.type === 'basic' && url.pathname === '/vault') {
           const clone = res.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(req, clone)).catch(() => undefined);
         }
@@ -42,11 +42,10 @@ self.addEventListener('fetch', (event) => {
         caches.match(req).then((cached) => {
           if (cached) return cached;
           if (req.mode === 'navigate') {
-            return caches.match('/vault').then((v) => v || caches.match('/'));
+            return caches.match('/vault');
           }
           return new Response('Offline', { status: 503, statusText: 'Offline' });
         })
       )
   );
 });
-

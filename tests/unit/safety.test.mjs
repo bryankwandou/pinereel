@@ -60,6 +60,15 @@ test('Node v24 checks safety.ts: blocks ads/malware/SSRF without rejecting gener
   assert.equal(httpMp4.verdict, 'SAFE');
   assert.equal(httpMp4.kidSafe, true);
 
+  const sonacastWeb = mod.sanitizeAndInspectUrl('https://sonacast-ten.vercel.app/favorites');
+  assert.equal(sonacastWeb.verdict, 'SAFE');
+  assert.equal(sonacastWeb.score, 100);
+  assert.equal(sonacastWeb.kidSafe, true);
+
+  const xSuffixDomain = mod.sanitizeAndInspectUrl('https://www.tedx.com.au/talks/live');
+  assert.equal(xSuffixDomain.verdict, 'SAFE');
+  assert.equal(xSuffixDomain.score, 100);
+
   const igLink = mod.sanitizeAndInspectUrl('instagram.com/reel/C8x1234abcd/?igsh=track123');
   assert.equal(igLink.verdict, 'SAFE');
   assert.equal(igLink.sourceType, 'instagram');

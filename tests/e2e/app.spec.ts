@@ -59,6 +59,17 @@ test.describe('PineReel Core E2E', () => {
     expect(eduBody.safety.verdict).toBe('SAFE');
     expect(eduBody.safety.kidSafe).toBe(true);
 
+    // General web streaming apps (e.g. Sonacast on Vercel) resolve with ok: true and sandboxed embed URL
+    const sonaRes = await request.post('/api/resolve', {
+      data: { url: 'https://sonacast-ten.vercel.app/favorites' },
+    });
+    expect(sonaRes.status()).toBe(200);
+    const sonaBody = await sonaRes.json();
+    expect(sonaBody.ok).toBe(true);
+    expect(sonaBody.safety.verdict).toBe('SAFE');
+    expect(sonaBody.safety.score).toBe(100);
+    expect(sonaBody.privacyEmbedUrl).toBe('https://sonacast-ten.vercel.app/favorites');
+
     // TikTok direct MP4 extraction
     const ttRes = await request.post('/api/resolve', {
       data: { url: 'https://www.tiktok.com/@scout2015/video/6718335390845095173' },

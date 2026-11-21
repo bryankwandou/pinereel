@@ -12,6 +12,7 @@
 
 import Link from 'next/link';
 import {
+  AnimatePresence,
   animate,
   motion,
   useInView,
@@ -379,5 +380,93 @@ export function ScrollRise({
     >
       {children}
     </motion.div>
+  );
+}
+
+const CYCLING_SOURCES = [
+  'YouTube 4K & Shorts',
+  'X (Twitter) Video',
+  'Instagram Reels',
+  'TikTok No-Watermark',
+  'Sonacast & Web Apps',
+  'Reddit & Vimeo',
+  'Direct MP4 & HLS .m3u8',
+];
+
+export function LiveSourceFlipper() {
+  const reduce = useSafeReducedMotion();
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (reduce) return;
+    const timer = setInterval(() => {
+      setIndex((i) => (i + 1) % CYCLING_SOURCES.length);
+    }, 2200);
+    return () => clearInterval(timer);
+  }, [reduce]);
+
+  return (
+    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-[var(--pr-r-pill)] border border-[var(--pr-signal-rule)] bg-[var(--pr-signal-wash)] text-xs font-semibold text-[var(--pr-signal)] overflow-hidden">
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--pr-signal)] animate-pulse" aria-hidden="true" />
+      <span className="pr-mono text-[11px] uppercase tracking-wider text-[var(--pr-ink-2)]">
+        LIVE SOURCE:
+      </span>
+      <span className="relative inline-flex items-center min-w-[165px] h-4 overflow-hidden">
+        <AnimatePresence mode="wait">
+          <motion.span
+            key={CYCLING_SOURCES[index]}
+            initial={reduce ? false : { y: 14, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={reduce ? undefined : { y: -14, opacity: 0 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className="pr-mono text-xs font-semibold text-[var(--pr-signal)] whitespace-nowrap"
+          >
+            {CYCLING_SOURCES[index]}
+          </motion.span>
+        </AnimatePresence>
+      </span>
+    </span>
+  );
+}
+
+export function PerspectiveTiltCard({
+  children,
+  className = '',
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  const reduce = useSafeReducedMotion();
+  const rotX = useSpring(0, { stiffness: 160, damping: 20 });
+  const rotY = useSpring(0, { stiffness: 160, damping: 20 });
+
+  if (reduce) {
+    return <div className={className}>{children}</div>;
+  }
+
+  return (
+    <div style={{ perspective: '1100px' }} className={className}>
+      <motion.div
+        style={{
+          rotateX: rotX,
+          rotateY: rotY,
+          transformStyle: 'preserve-3d',
+        }}
+        onPointerMove={(e) => {
+          if (e.pointerType !== 'mouse') return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const nx = (e.clientX - rect.left) / rect.width - 0.5;
+          const ny = (e.clientY - rect.top) / rect.height - 0.5;
+          rotY.set(nx * 7);
+          rotX.set(-ny * 7);
+        }}
+        onPointerLeave={() => {
+          rotX.set(0);
+          rotY.set(0);
+        }}
+      >
+        {children}
+      </motion.div>
+    </div>
   );
 }

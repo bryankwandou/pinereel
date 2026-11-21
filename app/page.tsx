@@ -1,13 +1,18 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, HardDrive, Shield, Terminal } from 'lucide-react';
 import { useApp } from '@/components/AppProvider';
+import { InteractiveMotionDeck } from '@/components/InteractiveMotionDeck';
 import {
   CountUpMetric,
   KineticLine,
+  LiveSourceFlipper,
   Magnetic,
+  PerspectiveTiltCard,
   ScrollRise,
+  StrikeThroughSweep,
   useSafeReducedMotion,
 } from '@/components/MotionKit';
 import { MountainSimulator } from '@/components/MountainSimulator';
@@ -58,6 +63,13 @@ const SOURCE_MATRIX = [
 export default function HomePage() {
   const { t, locale } = useApp();
   const reduce = useSafeReducedMotion();
+  const [selectedUrl, setSelectedUrl] = useState<string | undefined>(undefined);
+  const [triggerCount, setTriggerCount] = useState(0);
+
+  const handleSelectUrl = (url: string) => {
+    setSelectedUrl(url);
+    setTriggerCount((c) => c + 1);
+  };
 
   return (
     <div className="pb-20">
@@ -65,16 +77,28 @@ export default function HomePage() {
       <section className="border-b border-[var(--pr-rule)]">
         <div className="pr-wrap py-12 sm:py-16 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
           <div className="lg:col-span-7 space-y-5">
-            <span className="pr-kicker pr-enter" style={{ ['--pr-i' as string]: 0 }}>
-              <span className="inline-block w-2 h-2 rounded-full bg-[var(--pr-signal)]" aria-hidden="true" />
-              {t('hero.kicker')}
-            </span>
+            <div className="flex flex-wrap items-center gap-2.5 pr-enter" style={{ ['--pr-i' as string]: 0 }}>
+              <span className="pr-kicker">
+                <span className="inline-block w-2 h-2 rounded-full bg-[var(--pr-signal)]" aria-hidden="true" />
+                {t('hero.kicker')}
+              </span>
+              <LiveSourceFlipper />
+            </div>
 
             <h1 className="pr-display">
               <KineticLine text={t('hero.title.a')} locale={locale} />
               <br />
               <KineticLine text={t('hero.title.b')} locale={locale} accent baseDelayMs={200} />
             </h1>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs pr-mono">
+              <span className="px-2.5 py-1 rounded-[var(--pr-r-sm)] bg-[var(--pr-bad-wash)] border border-[var(--pr-bad-rule)] text-[var(--pr-bad)] font-semibold">
+                <StrikeThroughSweep>Popups, Ad Wrappers &amp; Malware APK</StrikeThroughSweep>
+              </span>
+              <span className="px-2.5 py-1 rounded-[var(--pr-r-sm)] bg-[var(--pr-good-wash)] border border-[var(--pr-good-rule)] text-[var(--pr-good)] font-semibold">
+                All Public Video &amp; Web Links Allowed
+              </span>
+            </div>
 
             <p className="pr-lead pr-enter" style={{ ['--pr-i' as string]: 2 }}>
               {t('hero.lead')}
@@ -125,7 +149,9 @@ export default function HomePage() {
           </div>
 
           <div className="lg:col-span-5">
-            <VaultShieldScene />
+            <PerspectiveTiltCard>
+              <VaultShieldScene />
+            </PerspectiveTiltCard>
           </div>
         </div>
       </section>
@@ -136,7 +162,17 @@ export default function HomePage() {
       {/* Primary Interactive Link Inspector & Isolated Player */}
       <section id="workbench" className="pr-wrap pt-10 sm:pt-12">
         <ScrollRise>
-          <VideoWorkbench />
+          <VideoWorkbench
+            externalUrlOverride={selectedUrl}
+            externalTriggerCount={triggerCount}
+          />
+        </ScrollRise>
+      </section>
+
+      {/* Interactive 0-100 Ad-Shield & 3D Motion Choreography Studio */}
+      <section className="pr-wrap pt-14 sm:pt-16">
+        <ScrollRise>
+          <InteractiveMotionDeck onSelectUrl={handleSelectUrl} />
         </ScrollRise>
       </section>
 

@@ -24,6 +24,7 @@ import { GuardianModal } from './GuardianModal';
 import { Magnetic } from './MotionKit';
 import type { MediaStreamVariant, ResolvedMedia } from '@/lib/server/media-resolver';
 import { CURATED_SAMPLES } from '@/lib/shared/presets';
+import { sanitizeAndInspectUrl } from '@/lib/shared/safety';
 import { cacheStreamIntoVault, formatBytes } from '@/lib/client/offline-vault';
 import { explorerUrl } from '@/lib/solana/config';
 import { submitWalletAttestation, type TxPhase } from '@/lib/solana/attestation';
@@ -67,6 +68,13 @@ export function VideoWorkbench({
   const [guardianOpen, setGuardianOpen] = useState(false);
   const [scanStep, setScanStep] = useState(0);
   const [ytdlpReady, setYtdlpReady] = useState<boolean | null>(null);
+  const [useServerProxy, setUseServerProxy] = useState(false);
+
+  const livePreview = useMemo(() => {
+    const trimmed = urlInput.trim();
+    if (!trimmed) return null;
+    return sanitizeAndInspectUrl(trimmed);
+  }, [urlInput]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -102,6 +110,7 @@ export function VideoWorkbench({
     setErrorMsg(null);
     setSavedVaultId(null);
     setVaultError(null);
+    setUseServerProxy(false);
     setTxPhase({ kind: 'idle' });
 
     try {
@@ -313,7 +322,21 @@ export function VideoWorkbench({
                   autoComplete="off"
                   spellCheck={false}
                   value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
+                  onChange={(e) => {
+                    setUrlInput(e.target.value);
+                    setErrorMsg(null);
+                    setResolved(null);
+                  }}
+                  onPaste={(e) => {
+                    const pasted = e.clipboardData?.getData('text')?.trim();
+                    if (pasted && (pasted.startsWith('http://') || pasted.startsWith('https://') || pasted.includes('.'))) {
+                      e.preventDefault();
+                      setUrlInput(pasted);
+                      setErrorMsg(null);
+                      setResolved(null);
+                      void inspectUrl(pasted);
+                    }
+                  }}
                   placeholder={t('hero.inputPlaceholder')}
                   className="pr-input pr-mono text-sm"
                   aria-describedby={errorMsg ? 'url-input-err' : undefined}
@@ -333,6 +356,30 @@ export function VideoWorkbench({
                 </button>
               </Magnetic>
             </div>
+
+            {livePreview && !loading && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-[var(--pr-r-sm)] bg-[var(--pr-sunken)] border border-[var(--pr-rule)] text-xs">
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span
+                    className={`pr-badge ${
+                      livePreview.verdict === 'BLOCKED' ? 'pr-badge--bad' : 'pr-badge--good'
+                    }`}
+                  >
+                    {livePreview.verdict === 'BLOCKED'
+                      ? `AD / MALWARE BLOCKED · ${livePreview.score}/100`
+                      : `AD-FREE PASS · ${livePreview.score}/100`}
+                  </span>
+                  <span className="pr-mono text-[11px] text-[var(--pr-ink-2)] truncate">
+                    {livePreview.sanitizedUrl || 'Standalone ad or executable binary blocked'}
+                  </span>
+                </div>
+                {livePreview.strippedParams.length > 0 && (
+                  <span className="pr-mono text-[11px] text-[var(--pr-warn)] shrink-0">
+                    Stripped {livePreview.strippedParams.length} tracker(s)
+                  </span>
+                )}
+              </div>
+            )}
 
             {errorMsg && (
               <p
@@ -408,12 +455,58 @@ export function VideoWorkbench({
           </div>
         </div>
       ) : !resolved ? (
-        <div className="pr-card p-8 text-center space-y-2 border-dashed">
-          <p className="pr-kicker justify-center">{t('player.kicker')}</p>
-          <h2 className="pr-h3">{t('player.emptyTitle')}</h2>
-          <p className="text-sm text-[var(--pr-ink-3)] max-w-xl mx-auto m-0">
-            {t('player.emptyBody')}
-          </p>
+        <div
+          data-allow-dark="true"
+          className="pr-stage-dark p-6 sm:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center"
+        >
+          <div className="lg:col-span-7 space-y-3">
+            <span className="pr-mono text-xs text-[#5fe09e] font-semibold uppercase tracking-wider flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-[#33c288] animate-pulse" aria-hidden="true" />
+              {t('player.kicker')} · AD-ONLY FILTER ACTIVE
+            </span>
+            <h2 className="pr-h2 text-[#f2f1ec]">{t('player.emptyTitle')}</h2>
+            <p className="text-sm text-[#c5ccc8] max-w-xl m-0">
+              {t('player.emptyBody')} All general video and web streaming links pass through cleanly; only ad servers, popup scripts, and executable malware (.apk / .exe) are blocked.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-2">
+              {CURATED_SAMPLES.slice(0, 3).map((s) => (
+                <button
+                  key={`stage-${s.id}`}
+                  type="button"
+                  onClick={() => {
+                    setUrlInput(s.url);
+                    void inspectUrl(s.url);
+                  }}
+                  className="px-3 py-1.5 rounded-[var(--pr-r-sm)] text-xs pr-mono font-semibold border border-[#245b43] bg-[#132d22] text-[#5fe09e] cursor-pointer"
+                >
+                  Launch: {s.sourceLabel}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="lg:col-span-5 space-y-2 p-4 rounded-[var(--pr-r-lg)] border border-[#243830] bg-[#101c18] text-xs pr-mono">
+            <div className="flex items-center justify-between text-[#929e98] pb-1 border-b border-[#243830]">
+              <span>LIVE GATE POLICY</span>
+              <span className="text-[#5fe09e]">VIDEOS UNBLOCKED</span>
+            </div>
+            <div className="flex items-center justify-between text-[#f2f1ec]">
+              <span>YouTube / X / IG / TikTok</span>
+              <span className="text-[#5fe09e]">ALLOW (AD-FREE)</span>
+            </div>
+            <div className="flex items-center justify-between text-[#f2f1ec]">
+              <span>General Web Apps (Sonacast)</span>
+              <span className="text-[#5fe09e]">ALLOW (SANDBOX)</span>
+            </div>
+            <div className="flex items-center justify-between text-[#f5b952]">
+              <span>DoubleClick / Outlink Wrappers</span>
+              <span>STRIP AD -&gt; PLAY VIDEO</span>
+            </div>
+            <div className="flex items-center justify-between text-[#f88a84]">
+              <span className="line-through">PopAds / Malware .APK</span>
+              <span>BLOCK AD ONLY</span>
+            </div>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -474,10 +567,14 @@ export function VideoWorkbench({
                     />
                   ) : resolved.privacyEmbedUrl ? (
                     <iframe
-                      src={resolved.privacyEmbedUrl}
+                      src={
+                        useServerProxy
+                          ? `/api/proxy-page?url=${encodeURIComponent(resolved.safety.sanitizedUrl)}`
+                          : resolved.privacyEmbedUrl
+                      }
                       title={resolved.title}
                       className="w-full h-full border-0 block"
-                      sandbox="allow-scripts allow-same-origin allow-presentation"
+                      sandbox="allow-scripts allow-same-origin allow-forms allow-presentation"
                       referrerPolicy="no-referrer"
                       allow="autoplay; encrypted-media; picture-in-picture"
                       allowFullScreen
@@ -599,6 +696,31 @@ export function VideoWorkbench({
                     >
                       {t('player.openWatch')}
                     </Link>
+
+                    {resolved.privacyEmbedUrl && !streamSrc && (
+                      <button
+                        type="button"
+                        onClick={() => setUseServerProxy((v) => !v)}
+                        className="pr-btn pr-btn--secondary pr-btn--sm"
+                      >
+                        <ShieldCheck size={14} aria-hidden="true" />
+                        <span>
+                          {useServerProxy
+                            ? 'Mode: Server Ad-Stripped Proxy'
+                            : 'Mode: Direct Ad-Sandbox (Switch to Proxy if X-Frame Blocked)'}
+                        </span>
+                      </button>
+                    )}
+
+                    <a
+                      href={resolved.safety.sanitizedUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="pr-btn pr-btn--ghost pr-btn--sm"
+                    >
+                      <ExternalLink size={13} aria-hidden="true" />
+                      <span>Open Clean URL</span>
+                    </a>
 
                     {savedVaultId && (
                       <Link
