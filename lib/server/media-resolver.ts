@@ -137,6 +137,7 @@ export function extractInstagramShortcode(rawUrl: string): { kind: 'p' | 'reel' 
 export function extractTikTokId(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
+    if (!u.hostname.toLowerCase().includes('tiktok.com')) return null;
     const m = u.pathname.match(/\/video\/(\d+)/i);
     return m ? m[1] : null;
   } catch {
@@ -147,6 +148,7 @@ export function extractTikTokId(rawUrl: string): string | null {
 export function extractVimeoId(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
+    if (!u.hostname.toLowerCase().includes('vimeo.com')) return null;
     const m = u.pathname.match(/\/(?:video\/)?(\d+)/);
     return m ? m[1] : null;
   } catch {
@@ -157,10 +159,12 @@ export function extractVimeoId(rawUrl: string): string | null {
 export function extractDailymotionId(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
-    if (u.hostname.toLowerCase().includes('dai.ly')) {
+    const host = u.hostname.toLowerCase();
+    if (host.includes('dai.ly')) {
       const part = u.pathname.split('/').filter(Boolean)[0];
       return part || null;
     }
+    if (!host.includes('dailymotion.com')) return null;
     const m = u.pathname.match(/\/video\/([a-zA-Z0-9]+)/i);
     return m ? m[1] : null;
   } catch {
@@ -171,6 +175,7 @@ export function extractDailymotionId(rawUrl: string): string | null {
 export function extractStreamableId(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
+    if (!u.hostname.toLowerCase().includes('streamable.com')) return null;
     const part = u.pathname.split('/').filter(Boolean)[0];
     return part || null;
   } catch {

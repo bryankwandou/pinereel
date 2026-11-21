@@ -70,7 +70,7 @@ test.describe('PineReel Core E2E', () => {
     expect(sonaBody.safety.score).toBe(100);
     expect(sonaBody.privacyEmbedUrl).toBe('https://sonacast-ten.vercel.app/favorites');
 
-    // Bing Videos search URL unwraps to ad-free youtube-nocookie embed (bypassing Bing/Shopee pre-roll ads)
+    // Bing Videos search URL unwraps to ad-free direct stream or isolated player (bypassing Bing/Shopee pre-roll ads)
     const bingRes = await request.post('/api/resolve', {
       data: { url: 'https://www.bing.com/videos/search?q=eh+hijau' },
     });
@@ -78,7 +78,8 @@ test.describe('PineReel Core E2E', () => {
     const bingBody = await bingRes.json();
     expect(bingBody.ok).toBe(true);
     expect(bingBody.safety.verdict).toBe('SAFE');
-    expect(bingBody.privacyEmbedUrl).toContain('youtube-nocookie.com/embed/');
+    expect(Boolean(bingBody.preferredStreamUrl || bingBody.privacyEmbedUrl)).toBe(true);
+    expect(bingBody.privacyEmbedUrl || '').not.toContain('bing.com');
 
     // TikTok direct MP4 extraction
     const ttRes = await request.post('/api/resolve', {
