@@ -105,7 +105,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     window.addEventListener('storage', onStorage);
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => undefined);
+      if ('caches' in window) {
+        window.caches
+          .keys()
+          .then((keys) =>
+            Promise.all(
+              keys
+                .filter((k) => k !== 'pinereel-shell-v3')
+                .map((k) => window.caches.delete(k))
+            )
+          )
+          .catch(() => undefined);
+      }
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((reg) => reg.update().catch(() => undefined))
+        .catch(() => undefined);
     }
 
     return () => {

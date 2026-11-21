@@ -182,6 +182,7 @@ export function VideoWorkbench({
   const kidRestricted = Boolean(
     resolved &&
       resolved.safety.verdict !== 'BLOCKED' &&
+      guardian.pinSet &&
       guardian.kidModeLocked &&
       !resolved.safety.kidSafe
   );

@@ -93,33 +93,6 @@ const OUTLINK_WRAPPER_HOSTS = new Set([
 
 const AD_UNWRAP_PARAMS = ['adurl', 'url', 'u', 'dest', 'destination', 'target', 'redirect', 'q', 'to'];
 
-// Host-scoped lure tokens only: blocks dedicated phishing/gambling hosts, never general video titles or paths.
-const AD_LURE_HOST_TOKENS = [
-  'seed-phrase',
-  'recovery-phrase',
-  'verify-wallet',
-  'wallet-sync',
-  'connect-claim',
-  'login-verify',
-  'account-suspended',
-  'slot-gacor',
-  'judol',
-  'togel-online',
-  'sbobet',
-  'pragmaticplay',
-];
-
-const EXPLICIT_ADULT_HOSTS = [
-  'pornhub.com',
-  'xvideos.com',
-  'xnxx.com',
-  'onlyfans.com',
-  'chaturbate.com',
-  'redtube.com',
-  'youporn.com',
-  'xhamster.com',
-];
-
 const EXECUTABLE_EXT_RE = /\.(exe|msi|apk|bat|cmd|scr|ps1|vbs|hta|dmg|pkg|deb|rpm|jar)(\?|#|$)/i;
 
 const SHORTENER_HOSTS = new Set([
@@ -257,11 +230,6 @@ export function extractWrappedDestinationUrl(parsed: URL): string | null {
     }
   }
   return null;
-}
-
-function isExplicitAdultHost(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^www\./, '');
-  return EXPLICIT_ADULT_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
 }
 
 export function sanitizeAndInspectUrl(
@@ -443,52 +411,19 @@ export function sanitizeAndInspectUrl(
     });
   }
 
-  // Block executable malware binaries rather than video streams
+  // Block executable malware binaries (.apk, .exe, .msi, etc.) rather than video streams
   if (EXECUTABLE_EXT_RE.test(lowerFull)) {
     score -= 90;
     reasons.push({
       code: 'EXECUTABLE_PAYLOAD',
       severity: 'block',
-      detail: 'Link points to an executable/installer binary rather than a video stream.',
+      detail: 'Link points to an executable/installer binary rather than a video or web stream.',
     });
   }
 
-  // Block dedicated phishing/gambling hosts & explicit adult domains ONLY (never block general video slugs/paths)
   const sourceType = detectSourcePlatform(parsed);
-  const isKnownVideoPlatform = sourceType !== 'other' && sourceType !== 'direct';
-
-  if (!isKnownVideoPlatform) {
-    const lureHit = AD_LURE_HOST_TOKENS.find((kw) => hostLower.includes(kw));
-    if (lureHit) {
-      score -= 85;
-      reasons.push({
-        code: 'AD_LURE_BLOCKED',
-        severity: 'block',
-        detail: `Blocked dedicated gambling-ad or phishing host matching "${lureHit}".`,
-      });
-    }
-  }
-
-  if (isExplicitAdultHost(hostLower)) {
-    score -= 80;
-    reasons.push({
-      code: 'ADULT_DOMAIN',
-      severity: 'block',
-      detail: 'Blocked explicit adult host incompatible with Kid-Safe viewing.',
-    });
-  }
-
-  if (/(?:^|\.)(youtube\.com|instagram\.com|twitter\.com)\.[a-z0-9.-]+$/i.test(hostLower)) {
-    score -= 80;
-    reasons.push({
-      code: 'DOMAIN_SPOOFING',
-      severity: 'block',
-      detail: 'Subdomain impersonates a video platform on an unrelated root domain.',
-    });
-  }
 
   if (parsed.protocol === 'http:') {
-    score -= 4;
     reasons.push({
       code: 'HTTP_PROXIED',
       severity: 'pass',
@@ -537,8 +472,7 @@ export function sanitizeAndInspectUrl(
   };
 }
 
-// Metadata screening adjusts Kid-Safe advisory status ONLY for explicit upstream age limits (>= 18)
-// or explicit non-family-safe flags; it NEVER blocks normal public videos on keywords.
+// Metadata screening never blocks or locks out public video links; it only records ad-overlay isolation.
 export function classifyMetadataSafety(
   report: SafetyReport,
   meta: {
@@ -551,38 +485,14 @@ export function classifyMetadataSafety(
   }
 ): SafetyReport {
   const reasons = [...report.reasons];
-  let score = report.score;
-  let kidSafe = report.kidSafe;
-
-  if (meta.ageLimit !== undefined && meta.ageLimit >= 18) {
-    score = Math.min(score, 65);
-    kidSafe = false;
-    reasons.push({
-      code: 'AGE_RESTRICTED',
-      severity: 'warn',
-      detail: `Origin age limit (${meta.ageLimit}+) requires Guardian PIN in Kid-Safe Mode.`,
-    });
-  }
-
-  if (meta.isFamilySafe === false || meta.possiblySensitive === true) {
-    score = Math.min(score, 70);
-    kidSafe = false;
-    reasons.push({
-      code: 'SENSITIVE_FLAG',
-      severity: 'warn',
-      detail: 'Origin flagged this video as sensitive or non-family-safe.',
-    });
-  }
-
-  const hasBlock = reasons.some((r) => r.severity === 'block');
-  const hasWarn = reasons.some((r) => r.severity === 'warn');
-  const verdict: SafetyVerdict = hasBlock || score < 50 ? 'BLOCKED' : hasWarn || score < 80 ? 'CAUTION' : 'SAFE';
+  const score = report.score;
+  const verdict = report.verdict;
 
   return {
     ...report,
-    score: Math.max(0, Math.min(100, score)),
+    score,
     verdict,
-    kidSafe: verdict === 'SAFE' && kidSafe,
+    kidSafe: verdict === 'SAFE',
     reasons,
     fingerprint: computeSha256Hex(`${report.sanitizedUrl}|${verdict}|${score}|${meta.title ?? ''}`),
   };

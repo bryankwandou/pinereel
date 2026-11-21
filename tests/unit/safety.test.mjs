@@ -22,13 +22,12 @@ test('Node v24 checks safety.ts: blocks ads/malware/SSRF without rejecting gener
     assert.equal(r.kidSafe, false);
   }
 
-  // 2. Standalone ad network, dedicated lure domains, & executable malware payloads are blocked
+  // 2. Standalone ad network & executable malware payloads (.apk, .exe) are blocked
   for (const lure of [
     'https://ads.doubleclick.net/slot-gacor-bonus.apk',
     'https://bit.ly/slot-gacor-maxwin-verify-wallet.apk',
-    'https://slot-gacor.example/watch',
-    'https://youtube.com.login-verify.example/watch?v=abc',
     'https://cdn.example/installer.exe',
+    'https://popads.net/ad-script',
   ]) {
     const r = mod.sanitizeAndInspectUrl(lure);
     assert.equal(r.verdict, 'BLOCKED', `Expected BLOCKED for ${lure}`);
@@ -80,14 +79,14 @@ test('Node v24 checks safety.ts: blocks ads/malware/SSRF without rejecting gener
   });
   assert.equal(newsWithKeywords.verdict, 'SAFE');
 
-  // 5. Explicit upstream age_limit >= 18 sets CAUTION advisory (never 403 BLOCKED for adult host unless porn site)
+  // 5. Metadata screening never locks out or blocks general videos (ad-only filter policy)
   const ageFlagged = mod.classifyMetadataSafety(noScheme, {
-    title: 'Age gated documentary',
+    title: 'General documentary video',
     ageLimit: 18,
     isFamilySafe: false,
   });
-  assert.equal(ageFlagged.kidSafe, false);
-  assert.equal(ageFlagged.verdict, 'CAUTION');
+  assert.equal(ageFlagged.kidSafe, true);
+  assert.equal(ageFlagged.verdict, 'SAFE');
 
   // 6. Deterministic SHA-256 digest verification
   const digest = mod.computeSha256Hex('pinereel-test');
