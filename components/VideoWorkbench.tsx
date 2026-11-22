@@ -70,6 +70,8 @@ export function VideoWorkbench({
   const [ytdlpReady, setYtdlpReady] = useState<boolean | null>(null);
   const [useServerProxy, setUseServerProxy] = useState(false);
   const [streamFailed, setStreamFailed] = useState(false);
+  const [forceEmbedMode, setForceEmbedMode] = useState(false);
+  const [detectedDuration, setDetectedDuration] = useState<number | null>(null);
 
   const livePreview = useMemo(() => {
     const trimmed = urlInput.trim();
@@ -113,6 +115,8 @@ export function VideoWorkbench({
     setVaultError(null);
     setUseServerProxy(false);
     setStreamFailed(false);
+    setForceEmbedMode(false);
+    setDetectedDuration(null);
     setTxPhase({ kind: 'idle' });
 
     try {
@@ -154,11 +158,14 @@ export function VideoWorkbench({
     return resolved.streams.find((s) => s.id === selectedVariantId) ?? resolved.streams[0];
   }, [resolved, selectedVariantId]);
 
-  const streamSrc = streamFailed
+  const rawStreamSrc = streamFailed
     ? null
     : activeVariant
     ? activeVariant.proxyUrl
     : resolved?.preferredStreamUrl ?? null;
+
+  const streamSrc =
+    forceEmbedMode && resolved?.privacyEmbedUrl ? null : rawStreamSrc;
 
   const handleVideoError = useCallback(() => {
     if (resolved?.streams && resolved.streams.length > 1 && activeVariant) {
@@ -582,6 +589,12 @@ export function VideoWorkbench({
                       preload="metadata"
                       poster={resolved.thumbnailUrl || undefined}
                       onError={handleVideoError}
+                      onLoadedMetadata={(e) => {
+                        const d = e.currentTarget.duration;
+                        if (Number.isFinite(d) && d > 0) {
+                          setDetectedDuration(Math.round(d));
+                        }
+                      }}
                       className="w-full h-full object-contain block"
                     />
                   ) : resolved.privacyEmbedUrl ? (
@@ -617,8 +630,34 @@ export function VideoWorkbench({
                           {resolved.safety.sourceType}
                         </span>
                         <span className="pr-mono text-xs text-[var(--pr-ink-3)]">
-                          {resolved.engine} · {formatDuration(resolved.durationSeconds)}
+                          {resolved.engine} · {formatDuration(resolved.durationSeconds ?? detectedDuration)}
                         </span>
+                        {rawStreamSrc && resolved.privacyEmbedUrl && (
+                          <div className="inline-flex items-center rounded-[var(--pr-r-sm)] border border-[var(--pr-rule-2)] bg-[var(--pr-raised)] p-0.5 text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() => setForceEmbedMode(false)}
+                              className={`px-2 py-0.5 rounded-[var(--pr-r-sm)] transition-colors ${
+                                !forceEmbedMode
+                                  ? 'bg-[var(--pr-pine)] text-[#F2F1EC] font-medium'
+                                  : 'text-[var(--pr-ink-3)] hover:text-[var(--pr-ink)]'
+                              }`}
+                            >
+                              Direct Stream
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setForceEmbedMode(true)}
+                              className={`px-2 py-0.5 rounded-[var(--pr-r-sm)] transition-colors ${
+                                forceEmbedMode
+                                  ? 'bg-[var(--pr-pine)] text-[#F2F1EC] font-medium'
+                                  : 'text-[var(--pr-ink-3)] hover:text-[var(--pr-ink)]'
+                              }`}
+                            >
+                              Original Embed
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <h2 className="pr-h3 truncate max-w-xl" title={resolved.title}>
                         {resolved.title}

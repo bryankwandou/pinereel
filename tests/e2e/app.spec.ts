@@ -81,11 +81,23 @@ test.describe('PineReel Core E2E', () => {
     expect(Boolean(bingBody.preferredStreamUrl || bingBody.privacyEmbedUrl)).toBe(true);
     expect(bingBody.privacyEmbedUrl || '').not.toContain('bing.com');
 
+    // Bing Videos riverview with a specific mid resolves to that exact mid's underlying video
+    const bingMidRes = await request.post('/api/resolve', {
+      data: {
+        url: 'https://www.bing.com/videos/riverview/relatedvideo?q=eh+hijau&mid=E7755E8E03FA03C2BEDEE7755E8E03FA03C2BEDE&FORM=VRDGAR',
+      },
+    });
+    expect(bingMidRes.status()).toBe(200);
+    const bingMidBody = await bingMidRes.json();
+    expect(bingMidBody.ok).toBe(true);
+    expect(bingMidBody.safety.verdict).toBe('SAFE');
+    expect(bingMidBody.privacyEmbedUrl).toContain('8OomIu5JJwQ');
+
     // LinkedIn, X, Threads, Facebook, and obscure websites all resolve with ok: true and login-free/ad-free player URLs
     for (const socialUrl of [
-      'https://www.linkedin.com/posts/satyanadella_ai-cloud-activity-7185638492018294784-abcd',
-      'https://x.com/NASA/status/20',
-      'https://www.threads.net/@mosseri/post/C8x1234abcd',
+      'https://www.linkedin.com/posts/nasa_over-500000-people-have-signed-up-to-send-activity-7529638646191263744-qxWa',
+      'https://x.com/OpenAI/status/1758192957386342435',
+      'https://www.threads.net/@zuck/post/CuVdfsNtmPn',
       'https://www.facebook.com/facebook/videos/10153231379946729/',
       'https://unknown-elderly-portal.example.org/watch/ceramah-pagi',
     ]) {

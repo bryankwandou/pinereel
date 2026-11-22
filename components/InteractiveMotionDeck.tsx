@@ -55,8 +55,8 @@ const LIVE_PACKETS = [
   { host: 'ads.doubleclick.net/pagead/adview', kind: 'ad', action: 'AD BLOCKED' },
   { host: 'sonacast-ten.vercel.app/favorites', kind: 'web', action: 'SANDBOX PLAY' },
   { host: 'popads.net/popunder.js', kind: 'ad', action: 'POPUP KILLED' },
-  { host: 'x.com/NASA/status/184587312', kind: 'video', action: 'MP4 EXTRACTED' },
-  { host: 'instagram.com/reel/C8x1234abcd', kind: 'video', action: 'CLEAN EMBED' },
+  { host: 'x.com/OpenAI/status/1758192957386342435', kind: 'video', action: 'MP4 EXTRACTED' },
+  { host: 'instagram.com/p/CmUv48DLvxd', kind: 'video', action: 'CLEAN EMBED' },
   { host: 'adsterra.com/slot-bonus.apk', kind: 'ad', action: 'APK BLOCKED' },
   { host: 'tiktok.com/@scout2015/video/67183', kind: 'video', action: 'NO-WATERMARK' },
 ];

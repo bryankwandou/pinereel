@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   classifyMetadataSafety,
+  detectSourcePlatform,
   isAdNetworkHost,
   type SafetyReport,
   type SourcePlatform,
@@ -113,9 +114,10 @@ export function extractYouTubeId(rawUrl: string): string | null {
 export function extractTweetInfo(rawUrl: string): { user?: string; id: string } | null {
   try {
     const u = new URL(rawUrl);
-    const m = u.pathname.match(/^\/(?:([^/]+)\/)?status(?:es)?\/(\d+)/i);
+    const m = u.pathname.match(/\/(?:([^/]+)\/)?status(?:es)?\/(\d+)/i);
     if (!m) return null;
-    return { user: m[1] || 'i', id: m[2] };
+    const rawUser = m[1] && m[1].toLowerCase() !== 'web' ? m[1] : 'i';
+    return { user: rawUser, id: m[2] };
   } catch {
     return null;
   }
@@ -124,7 +126,7 @@ export function extractTweetInfo(rawUrl: string): { user?: string; id: string } 
 export function extractInstagramShortcode(rawUrl: string): { kind: 'p' | 'reel' | 'tv'; code: string } | null {
   try {
     const u = new URL(rawUrl);
-    const m = u.pathname.match(/^\/(p|reel|reels|tv)\/([a-zA-Z0-9_-]+)/i);
+    const m = u.pathname.match(/\/(?:[^/]+\/)?(p|reel|reels|tv)\/([a-zA-Z0-9_-]+)/i);
     if (!m) return null;
     const rawKind = m[1].toLowerCase();
     const kind = rawKind === 'reels' ? 'reel' : (rawKind as 'p' | 'reel' | 'tv');
@@ -138,8 +140,12 @@ export function extractTikTokId(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
     if (!u.hostname.toLowerCase().includes('tiktok.com')) return null;
-    const m = u.pathname.match(/\/video\/(\d+)/i);
-    return m ? m[1] : null;
+    const m =
+      u.pathname.match(/\/(?:video|v)\/(\d+)/i) ||
+      u.pathname.match(/\/embed\/v2\/(\d+)/i);
+    if (m?.[1]) return m[1];
+    const itemId = u.searchParams.get('item_id');
+    return itemId && /^\d+$/.test(itemId) ? itemId : null;
   } catch {
     return null;
   }
@@ -217,15 +223,33 @@ async function fetchTextBounded(url: string, maxBytes = 650_000, timeoutMs = 700
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const host = new URL(url).hostname.toLowerCase();
+    const needsSocialCrawlerUa =
+      host.includes('linkedin.com') ||
+      host === 'lnkd.in';
+    const desktopUa =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+    const crawlerUa =
+      'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)';
+
+    let res = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        'User-Agent': needsSocialCrawlerUa ? crawlerUa : desktopUa,
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
+        Cookie: 'CONSENT=YES+cb.20210328-17-p0.en+FX+999',
       },
     });
+    if ((!res.ok || res.status === 999 || /\/(login|authwall|checkpoint)/i.test(res.url || '')) && !needsSocialCrawlerUa) {
+      res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': crawlerUa,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+    }
     if (!res.ok || !res.body) return null;
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -1248,7 +1272,8 @@ async function resolveRedditCloud(url: string, safety: SafetyReport): Promise<Re
 
 async function verifyDirectStreamCandidate(
   candidateUrl: string,
-  refererPageUrl?: string
+  refererPageUrl?: string,
+  minSizeBytes = 0
 ): Promise<boolean> {
   try {
     await assertSafeRemoteUrl(candidateUrl);
@@ -1293,6 +1318,15 @@ async function verifyDirectStreamCandidate(
     ) {
       return false;
     }
+    if (minSizeBytes > 0 && !ct.includes('mpegurl')) {
+      const clHeader = res.headers.get('content-length');
+      const crHeader = res.headers.get('content-range');
+      const totalFromCr = crHeader?.match(/\/(\d+)$/)?.[1];
+      const knownSize = totalFromCr ? Number(totalFromCr) : clHeader ? Number(clHeader) : null;
+      if (knownSize !== null && Number.isFinite(knownSize) && knownSize > 0 && knownSize < minSizeBytes) {
+        return false;
+      }
+    }
     return (
       ct.startsWith('video/') ||
       ct.startsWith('audio/') ||
@@ -1301,6 +1335,145 @@ async function verifyDirectStreamCandidate(
     );
   } catch {
     return false;
+  }
+}
+
+async function searchYouTubeVideoIdAccurate(query: string): Promise<string | null> {
+  const cleanQuery = query.trim();
+  if (!cleanQuery) return null;
+
+  // 1. Official YouTube InnerTube v1/search JSON API (works from all datacenter IPs without consent walls)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: '2.20241120.01.00',
+            hl: 'id',
+            gl: 'ID',
+          },
+        },
+        query: cleanQuery,
+      }),
+    }).finally(() => clearTimeout(timer));
+
+    if (res.ok) {
+      const text = await res.text();
+      const vidId = text.match(/"videoRenderer"\s*:\s*\{\s*"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/)?.[1] ||
+        text.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/)?.[1];
+      if (vidId) return vidId;
+    }
+  } catch {
+    // Fall through to Yahoo Video Search
+  }
+
+  // 2. Yahoo Video Search (accurate query matching, no decoy trending feed)
+  try {
+    const yhHtml = await fetchTextBounded(
+      `https://video.search.yahoo.com/search/video?p=${encodeURIComponent(cleanQuery)}`
+    );
+    if (yhHtml) {
+      const decodedYh = decodeURIComponent(yhHtml.replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+      const yhVid = decodedYh.match(/youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/)?.[1];
+      if (yhVid) return yhVid;
+    }
+  } catch {
+    // Fall through
+  }
+
+  // 3. YouTube HTML search with consent cookie
+  const ytSearchHtml = await fetchTextBounded(
+    `https://www.youtube.com/results?search_query=${encodeURIComponent(cleanQuery)}`
+  );
+  return ytSearchHtml?.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/)?.[1] || null;
+}
+
+async function resolveBingMidExactVideoUrl(
+  bingPageUrl: string,
+  mid: string,
+  query: string
+): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6500);
+  try {
+    const desktopUa =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+    const bRes = await fetch(bingPageUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': desktopUa,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    if (!bRes.ok) return null;
+    const cookies =
+      typeof bRes.headers.getSetCookie === 'function'
+        ? bRes.headers
+            .getSetCookie()
+            .map((c) => c.split(';')[0])
+            .join('; ')
+        : bRes.headers.get('set-cookie') || '';
+    const rawHtml = await bRes.text();
+    const decoded = rawHtml.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
+    // 1. Check if the exact mid has an inline JSON block in the HTML
+    const escapedMid = mid.replace(/[^a-zA-Z0-9_-]/g, '');
+    const sameObjRe1 = new RegExp(
+      `\\{[^{}]*"mid"\\s*:\\s*"${escapedMid}"[^{}]*"murl"\\s*:\\s*"(https?:\\/\\/[^"]+)"`,
+      'i'
+    );
+    const sameObjRe2 = new RegExp(
+      `\\{[^{}]*"murl"\\s*:\\s*"(https?:\\/\\/[^"]+)"[^{}]*"mid"\\s*:\\s*"${escapedMid}"`,
+      'i'
+    );
+    const inlineMatch = decoded.match(sameObjRe1)?.[1] || decoded.match(sameObjRe2)?.[1];
+    if (inlineMatch) return inlineMatch;
+
+    // 2. Call Bing's internal VideoDetailRequestController endpoint (/videos/api/custom/details?id=<mid>)
+    const pqs = decoded.match(/"persistedQueryStrings"\s*:\s*"([^"]+)"/)?.[1];
+    if (pqs) {
+      const apiUrl = `https://www.bing.com/videos/api/custom/details?vdpp=rvrv&mmcaptn=Bing.Video&modules=videoresult&id=${encodeURIComponent(
+        mid
+      )}&q=${encodeURIComponent(query)}&${pqs}`;
+      const apiRes = await fetch(apiUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': desktopUa,
+          Cookie: cookies,
+          Referer: bingPageUrl,
+          Accept: 'application/json, text/plain, */*',
+        },
+      });
+      if (apiRes.ok) {
+        const data = (await apiRes.json().catch(() => null)) as {
+          videoResult?: {
+            contentUrl?: string;
+            hostPageUrl?: string;
+            embedHtml?: string;
+          };
+        } | null;
+        const vr = data?.videoResult;
+        if (vr?.contentUrl && /^https?:\/\//i.test(vr.contentUrl)) return vr.contentUrl;
+        if (vr?.hostPageUrl && /^https?:\/\//i.test(vr.hostPageUrl)) return vr.hostPageUrl;
+        const iframeSrc = vr?.embedHtml?.match(/src=["'](https?:\/\/[^"']+)["']/i)?.[1];
+        if (iframeSrc) return iframeSrc;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -1323,16 +1496,15 @@ async function resolveSearchOrPortalVideoCloud(
     const isDdgSearch = host.endsWith('duckduckgo.com') && u.searchParams.has('q');
 
     if (isBingVideos || isGoogleSearch || isYahooVideo || isYandexVideo || isDdgSearch) {
+      let targetVideoUrl: string | null = null;
+
       const directParam =
         u.searchParams.get('murl') ||
         u.searchParams.get('purl') ||
         u.searchParams.get('url') ||
         u.searchParams.get('ru');
       if (directParam && /^https?:\/\//i.test(directParam) && directParam !== url) {
-        const subYt = extractYouTubeId(directParam);
-        if (subYt) {
-          return resolveYouTubeCloud(`https://www.youtube.com/watch?v=${subYt}`, safety);
-        }
+        targetVideoUrl = directParam;
       }
 
       const query =
@@ -1343,82 +1515,69 @@ async function resolveSearchOrPortalVideoCloud(
         '';
       const mid = u.searchParams.get('mid') || '';
 
-      let targetVideoUrl: string | null = null;
-
-      // If Bing Video has a specific mid, inspect Bing HTML for the matching mid's murl/purl
-      if (isBingVideos) {
-        const bingHtml = await fetchTextBounded(url);
-        const decoded = (bingHtml || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-        if (mid) {
-          const midIdx = decoded.indexOf(mid);
-          if (midIdx !== -1) {
-            const windowSlice = decoded.slice(Math.max(0, midIdx - 600), midIdx + 900);
-            const murlMatch =
-              windowSlice.match(/"murl"\s*:\s*"(https?:\/\/[^"]+)"/) ||
-              windowSlice.match(/"purl"\s*:\s*"(https?:\/\/[^"]+)"/);
-            if (murlMatch?.[1]) targetVideoUrl = murlMatch[1];
-          }
-        }
-        if (!targetVideoUrl && decoded) {
-          const firstMurl =
-            decoded.match(/"murl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ||
-            decoded.match(/"purl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1];
-          if (firstMurl && extractYouTubeId(firstMurl) && !query) {
-            targetVideoUrl = firstMurl;
-          }
-        }
+      // If Bing Video has a specific mid, resolve that exact mid via Bing's VideoDetails API
+      if (!targetVideoUrl && isBingVideos && mid) {
+        targetVideoUrl = await resolveBingMidExactVideoUrl(url, mid, query);
       }
 
-      // Resolve search query directly against YouTube search to obtain the exact ad-free video ID
-      // (bypasses Bing/MSN pre-roll ads such as Shopee.Co.Id completely!)
-      if (!targetVideoUrl && query.trim()) {
-        const ytSearchHtml = await fetchTextBounded(
-          `https://www.youtube.com/results?search_query=${encodeURIComponent(query.trim())}`
-        );
-        const topVidId = ytSearchHtml?.match(/"videoId"\s*:\s*"([a-zA-Z0-9_-]{11})"/)?.[1];
+      // Only perform a search-query lookup when the user pasted a search results URL without a specific video mid
+      if (!targetVideoUrl && !mid && query.trim()) {
+        const topVidId = await searchYouTubeVideoIdAccurate(query);
         if (topVidId) {
           targetVideoUrl = `https://www.youtube.com/watch?v=${topVidId}`;
         }
       }
 
-      if (!targetVideoUrl && query.trim()) {
-        const bingSearchHtml = await fetchTextBounded(
-          `https://www.bing.com/videos/search?q=${encodeURIComponent(query.trim())}`
-        );
-        const decodedSearch = (bingSearchHtml || '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
-        targetVideoUrl =
-          decodedSearch.match(/"murl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ||
-          decodedSearch.match(/"purl"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ||
-          null;
-      }
+      if (targetVideoUrl && targetVideoUrl !== url) {
+        let targetSafety: SafetyReport = safety;
+        try {
+          const parsedTarget = new URL(targetVideoUrl);
+          targetSafety = {
+            ...safety,
+            sanitizedUrl: targetVideoUrl,
+            hostname: parsedTarget.hostname,
+            sourceType: detectSourcePlatform(parsedTarget),
+          };
+        } catch {
+          // Keep existing safety metadata
+        }
 
-      if (targetVideoUrl) {
         const ytId = extractYouTubeId(targetVideoUrl);
         if (ytId) {
           const resolvedYt = await resolveYouTubeCloud(
             `https://www.youtube.com/watch?v=${ytId}`,
-            safety
+            { ...targetSafety, sourceType: 'youtube' }
           );
           if (resolvedYt) {
             return {
               ...resolvedYt,
               offlineNote:
-                'Unwrapped search engine video wrapper and stripped pre-roll ads (Shopee / Bing Ads bypassed).',
+                'Unwrapped search engine video link to the exact underlying video with pre-roll ads stripped.',
             };
           }
         }
         const dmId = extractDailymotionId(targetVideoUrl);
         if (dmId) {
-          return resolveDailymotionCloud(targetVideoUrl, safety);
+          return resolveDailymotionCloud(targetVideoUrl, { ...targetSafety, sourceType: 'dailymotion' });
         }
         const ttId = extractTikTokId(targetVideoUrl);
         if (ttId) {
-          return resolveTikTokCloud(targetVideoUrl, safety);
+          return resolveTikTokCloud(targetVideoUrl, { ...targetSafety, sourceType: 'tiktok' });
         }
         const vmId = extractVimeoId(targetVideoUrl);
         if (vmId) {
-          return resolveVimeoCloud(targetVideoUrl, safety);
+          return resolveVimeoCloud(targetVideoUrl, { ...targetSafety, sourceType: 'vimeo' });
         }
+        const igCode = extractInstagramShortcode(targetVideoUrl);
+        if (igCode) {
+          return resolveInstagramCloud(targetVideoUrl, { ...targetSafety, sourceType: 'instagram' });
+        }
+        const twInfo = extractTweetInfo(targetVideoUrl);
+        if (twInfo) {
+          return resolveXCloud(targetVideoUrl, { ...targetSafety, sourceType: 'x' });
+        }
+        const directMedia = await resolveDirectMedia(targetVideoUrl, targetSafety);
+        if (directMedia) return directMedia;
       }
     }
 
@@ -1567,29 +1726,41 @@ async function resolveSearchOrPortalVideoCloud(
       host === 'fb.watch' ||
       host === 'fb.com'
     ) {
-      const fbHtml = await fetchTextBounded(url);
+      const isPostOnly = /\/posts\/|\/permalink|story_fbid=/i.test(url) && !/\/videos\/|\/reel\/|\/watch/i.test(url);
+      const fbPluginUrl = isPostOnly
+        ? `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=true`
+        : `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false`;
+
+      // Fetch the isolated single-video plugin HTML first so we never match unrelated recommended feed videos
+      const [pluginHtml, fbHtml] = await Promise.all([
+        isPostOnly ? Promise.resolve(null) : fetchTextBounded(fbPluginUrl),
+        fetchTextBounded(url),
+      ]);
       const variants: MediaStreamVariant[] = [];
       const title =
         (fbHtml && (extractMetaTag(fbHtml, 'og:title') || extractMetaTag(fbHtml, 'twitter:title'))) ||
         'Facebook Video';
       const thumb = (fbHtml && extractMetaTag(fbHtml, 'og:image')) || null;
 
-      if (fbHtml) {
+      const streamSourceHtml = pluginHtml || fbHtml;
+      if (streamSourceHtml) {
         const hdMatch =
-          fbHtml.match(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/) ||
-          fbHtml.match(/"browser_native_hd_url"\s*:\s*"([^"]+)"/) ||
-          fbHtml.match(/"hd_src"\s*:\s*"([^"]+)"/);
+          streamSourceHtml.match(/"hd_src_no_ratelimit"\s*:\s*"([^"]+)"/) ||
+          streamSourceHtml.match(/"hd_src"\s*:\s*"([^"]+)"/) ||
+          streamSourceHtml.match(/"playable_url_quality_hd"\s*:\s*"([^"]+)"/) ||
+          streamSourceHtml.match(/"browser_native_hd_url"\s*:\s*"([^"]+)"/);
         const sdMatch =
-          fbHtml.match(/"playable_url"\s*:\s*"([^"]+)"/) ||
-          fbHtml.match(/"browser_native_sd_url"\s*:\s*"([^"]+)"/) ||
-          fbHtml.match(/"sd_src"\s*:\s*"([^"]+)"/);
+          streamSourceHtml.match(/"sd_src_no_ratelimit"\s*:\s*"([^"]+)"/) ||
+          streamSourceHtml.match(/"sd_src"\s*:\s*"([^"]+)"/) ||
+          streamSourceHtml.match(/"playable_url"\s*:\s*"([^"]+)"/) ||
+          streamSourceHtml.match(/"browser_native_sd_url"\s*:\s*"([^"]+)"/);
         for (const [label, raw] of [
           ['HD MP4', hdMatch?.[1]],
           ['SD MP4', sdMatch?.[1]],
         ] as const) {
           if (raw) {
             const clean = raw.replace(/\\u0025/g, '%').replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-            if (/^https?:\/\//i.test(clean)) {
+            if (/^https?:\/\//i.test(clean) && !variants.some((v) => v.url === clean)) {
               variants.push({
                 id: `fb-${variants.length}`,
                 label,
@@ -1608,11 +1779,6 @@ async function resolveSearchOrPortalVideoCloud(
           }
         }
       }
-
-      const isPostOnly = /\/posts\/|\/permalink|story_fbid=/i.test(url) && !/\/videos\/|\/reel\/|\/watch/i.test(url);
-      const fbPluginUrl = isPostOnly
-        ? `https://www.facebook.com/plugins/post.php?href=${encodeURIComponent(url)}&show_text=true`
-        : `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false`;
 
       const preferred = variants[0] ?? null;
       return {
@@ -1701,6 +1867,9 @@ async function resolveSearchOrPortalVideoCloud(
   }
 }
 
+const PREVIEW_OR_DECO_MEDIA_RE =
+  /(?:^|[/_.-])(preview|trailer|teaser|thumb|motionthumb|hover|sample|promo|preroll|advert|banner|hero|bg|background|loop|loader|placeholder|intro|bumper)(?:[/_.-]|\.(?:mp4|webm|m3u8)|$)/i;
+
 async function resolveAnyWebVideoPage(
   url: string,
   safety: SafetyReport,
@@ -1715,25 +1884,36 @@ async function resolveAnyWebVideoPage(
   const html = await fetchTextBounded(url);
   if (!html) return null;
 
-  const candidateUrls: string[] = [];
+  const candidateUrls: { url: string; authoritative: boolean }[] = [];
   const metaVid =
     extractMetaTag(html, 'og:video:secure_url') ||
     extractMetaTag(html, 'og:video:url') ||
     extractMetaTag(html, 'og:video') ||
     extractMetaTag(html, 'twitter:player:stream');
-  if (metaVid) candidateUrls.push(metaVid);
+  if (metaVid) candidateUrls.push({ url: metaVid, authoritative: true });
 
-  for (const tagMatch of html.matchAll(/<(?:video|source)[^>]+src=["']([^"']+)["']/gi)) {
-    if (tagMatch[1]) candidateUrls.push(decodeHtmlEntities(tagMatch[1]));
+  // Only extract <video>/<source> tags when the page has a single primary video player (not a multi-card gallery or background loop)
+  const allVideoTags = [...html.matchAll(/<video\b[^>]*>/gi)];
+  if (allVideoTags.length <= 2) {
+    for (const tagMatch of html.matchAll(/<(?:video|source)\b([^>]+)>/gi)) {
+      const attrs = tagMatch[1] || '';
+      if (/\bloop\b/i.test(attrs) && /\bmuted\b/i.test(attrs)) continue;
+      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+      if (srcMatch?.[1]) {
+        const candidate = decodeHtmlEntities(srcMatch[1]);
+        if (!PREVIEW_OR_DECO_MEDIA_RE.test(candidate)) {
+          candidateUrls.push({ url: candidate, authoritative: false });
+        }
+      }
+    }
   }
 
-  for (const jsonLdMatch of html.matchAll(/"contentUrl"\s*:\s*"([^"]+)"/gi)) {
-    if (jsonLdMatch[1]) candidateUrls.push(jsonLdMatch[1].replace(/\\\//g, '/'));
-  }
-
-  for (const rawMediaMatch of html.matchAll(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|webm|m3u8)(?:\?[^\s"'<>\\]*)?/gi)) {
-    candidateUrls.push(rawMediaMatch[0]);
-    if (candidateUrls.length >= 6) break;
+  // Only extract JSON-LD contentUrl when the page defines a single primary VideoObject (not an ItemList gallery of many cards)
+  const jsonLdContentUrls = [...html.matchAll(/"contentUrl"\s*:\s*"([^"]+)"/gi)].map((m) =>
+    m[1].replace(/\\\//g, '/')
+  );
+  if (jsonLdContentUrls.length === 1 && !PREVIEW_OR_DECO_MEDIA_RE.test(jsonLdContentUrls[0])) {
+    candidateUrls.push({ url: jsonLdContentUrls[0], authoritative: true });
   }
 
   const rawTitleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
@@ -1753,7 +1933,7 @@ async function resolveAnyWebVideoPage(
   const seen = new Set<string>();
   const variants: MediaStreamVariant[] = [];
 
-  for (const rawCandidate of candidateUrls) {
+  for (const { url: rawCandidate, authoritative } of candidateUrls) {
     let resolved: string;
     try {
       resolved = new URL(rawCandidate, url).toString();
@@ -1778,8 +1958,12 @@ async function resolveAnyWebVideoPage(
     if (!isDirectStream) continue;
 
     // Verify that the direct stream candidate actually responds with a valid media Content-Type
-    // (prevents dead 0:00 <video> boxes and 415 download.json errors!)
-    const playable = await verifyDirectStreamCandidate(resolved, url);
+    // and is not a tiny preview/hover animation
+    const playable = await verifyDirectStreamCandidate(
+      resolved,
+      url,
+      authoritative ? 0 : 250_000
+    );
     if (!playable) continue;
 
     const ext = isHls ? 'm3u8' : resolved.match(/\.(webm|m4v|mov)/i)?.[1]?.toLowerCase() ?? 'mp4';
@@ -1799,53 +1983,48 @@ async function resolveAnyWebVideoPage(
     });
   }
 
-  // Detect clean embedded video iframes on general web pages (skipping all ad-network frames!)
+  // Always compute clean embedded player or ad-shielded page fallback so the user can always view the exact original video/page
   let embedFallback: string | null = null;
-  if (variants.length === 0) {
-    const ytEmbed = html.match(/https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{11})/);
-    if (ytEmbed?.[1]) {
-      embedFallback = `https://www.youtube-nocookie.com/embed/${ytEmbed[1]}?rel=0&modestbranding=1&iv_load_policy=3`;
+  const ytEmbed = html.match(/https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{11})/);
+  if (ytEmbed?.[1]) {
+    embedFallback = `https://www.youtube-nocookie.com/embed/${ytEmbed[1]}?rel=0&modestbranding=1&iv_load_policy=3`;
+  } else {
+    const vmEmbed = html.match(/https:\/\/player\.vimeo\.com\/video\/(\d+)/);
+    if (vmEmbed?.[1]) {
+      embedFallback = `https://player.vimeo.com/video/${vmEmbed[1]}?dnt=1`;
     } else {
-      const vmEmbed = html.match(/https:\/\/player\.vimeo\.com\/video\/(\d+)/);
-      if (vmEmbed?.[1]) {
-        embedFallback = `https://player.vimeo.com/video/${vmEmbed[1]}?dnt=1`;
-      } else {
-        const jsonEmbed = html.match(/"embedUrl"\s*:\s*"([^"]+)"/i)?.[1]?.replace(/\\\//g, '/');
-        if (jsonEmbed && /^https:\/\//i.test(jsonEmbed)) {
-          try {
-            if (!isAdNetworkHost(new URL(jsonEmbed).hostname)) embedFallback = jsonEmbed;
-          } catch {
-            // Skip invalid embedUrl
-          }
+      const jsonEmbed = html.match(/"embedUrl"\s*:\s*"([^"]+)"/i)?.[1]?.replace(/\\\//g, '/');
+      if (jsonEmbed && /^https:\/\//i.test(jsonEmbed)) {
+        try {
+          if (!isAdNetworkHost(new URL(jsonEmbed).hostname)) embedFallback = jsonEmbed;
+        } catch {
+          // Skip invalid embedUrl
         }
-        if (!embedFallback) {
-          for (const frameMatch of html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) {
-            const rawSrc = decodeHtmlEntities(frameMatch[1] || '');
-            if (!/^https:\/\//i.test(rawSrc)) continue;
-            try {
-              const u = new URL(rawSrc);
-              if (isAdNetworkHost(u.hostname)) continue;
-              if (
-                /vimeo|dailymotion|peertube|rumble|loom|ted\.com|twitch\.tv|bilibili|archive\.org|youtube/i.test(
-                  u.hostname + u.pathname
-                )
-              ) {
-                embedFallback = u.toString();
-                break;
-              }
-            } catch {
-              continue;
+      }
+      if (!embedFallback) {
+        for (const frameMatch of html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)) {
+          const rawSrc = decodeHtmlEntities(frameMatch[1] || '');
+          if (!/^https:\/\//i.test(rawSrc)) continue;
+          try {
+            const u = new URL(rawSrc);
+            if (isAdNetworkHost(u.hostname)) continue;
+            if (
+              /vimeo|dailymotion|peertube|rumble|loom|ted\.com|twitch\.tv|bilibili|archive\.org|youtube/i.test(
+                u.hostname + u.pathname
+              )
+            ) {
+              embedFallback = u.toString();
+              break;
             }
+          } catch {
+            continue;
           }
         }
       }
     }
   }
 
-  // If no direct MP4/HLS was found in static HTML (e.g., client-rendered SPA like Sonacast or general web media app),
-  // check if the origin restricts framing via X-Frame-Options or CSP frame-ancestors; if so, route through
-  // PineReel's server-side ad-stripping proxy (/api/proxy-page) so every website opens without framing blocks!
-  if (variants.length === 0 && !embedFallback) {
+  if (!embedFallback) {
     let framingRestricted = false;
     try {
       const controller = new AbortController();
