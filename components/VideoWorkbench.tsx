@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useApp } from './AppProvider';
 import { GuardianModal } from './GuardianModal';
-import { Magnetic } from './MotionKit';
+import { AnimatedScoreRing, Magnetic } from './MotionKit';
 import type { MediaStreamVariant, ResolvedMedia } from '@/lib/server/media-resolver';
 import { CURATED_SAMPLES } from '@/lib/shared/presets';
 import { sanitizeAndInspectUrl } from '@/lib/shared/safety';
@@ -161,8 +161,8 @@ export function VideoWorkbench({
   const rawStreamSrc = streamFailed
     ? null
     : activeVariant
-    ? activeVariant.proxyUrl
-    : resolved?.preferredStreamUrl ?? null;
+      ? activeVariant.proxyUrl
+      : resolved?.preferredStreamUrl ?? null;
 
   const streamSrc =
     forceEmbedMode && resolved?.privacyEmbedUrl ? null : rawStreamSrc;
@@ -205,10 +205,10 @@ export function VideoWorkbench({
 
   const kidRestricted = Boolean(
     resolved &&
-      resolved.safety.verdict !== 'BLOCKED' &&
-      guardian.pinSet &&
-      guardian.kidModeLocked &&
-      !resolved.safety.kidSafe
+    resolved.safety.verdict !== 'BLOCKED' &&
+    guardian.pinSet &&
+    guardian.kidModeLocked &&
+    !resolved.safety.kidSafe
   );
 
   const handleSaveOffline = async () => {
@@ -386,9 +386,8 @@ export function VideoWorkbench({
               <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-[var(--pr-r-sm)] bg-[var(--pr-sunken)] border border-[var(--pr-rule)] text-xs">
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                   <span
-                    className={`pr-badge ${
-                      livePreview.verdict === 'BLOCKED' ? 'pr-badge--bad' : 'pr-badge--good'
-                    }`}
+                    className={`pr-badge ${livePreview.verdict === 'BLOCKED' ? 'pr-badge--bad' : 'pr-badge--good'
+                      }`}
                   >
                     {livePreview.verdict === 'BLOCKED'
                       ? `AD / MALWARE BLOCKED · ${livePreview.score}/100`
@@ -418,36 +417,42 @@ export function VideoWorkbench({
             )}
           </form>
 
-          {/* Quick testable real links + threat filter simulation */}
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <span className="text-xs font-medium text-[var(--pr-ink-3)]">
-              {t('hero.samplePrefix')}
-            </span>
-            {CURATED_SAMPLES.map((sample) => (
-              <button
-                key={sample.id}
-                ref={(el) => registerTarget?.(`sample-${sample.id}`, el)}
-                type="button"
-                onClick={() => {
-                  setUrlInput(sample.url);
-                  void inspectUrl(sample.url);
-                }}
-                className={`px-2.5 py-1 rounded-[var(--pr-r-pill)] text-xs font-medium border cursor-pointer transition-colors ${
-                  sample.expectedKind === 'blocked'
-                    ? 'border-[var(--pr-bad-rule)] bg-[var(--pr-bad-wash)] text-[var(--pr-bad)]'
-                    : 'border-[var(--pr-rule)] bg-[var(--pr-sunken)] text-[var(--pr-ink-2)] hover:text-[var(--pr-ink)] hover:border-[var(--pr-rule-2)]'
-                }`}
-              >
-                {sample.label}
-              </button>
-            ))}
+          {/* Quick testable real links organized in a tidy interactive dock */}
+          <div className="pt-2 border-t border-[var(--pr-rule)] space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="pr-kicker">{t('hero.samplePrefix')}</span>
+              <span className="pr-mono text-[11px] text-[var(--pr-ink-3)]">
+                1-CLICK DIRECT MP4 VERIFICATION
+              </span>
+            </div>
+            <div className="pr-chip-rail">
+              {CURATED_SAMPLES.map((sample) => (
+                <motion.button
+                  key={sample.id}
+                  ref={(el) => registerTarget?.(`sample-${sample.id}`, el)}
+                  type="button"
+                  whileHover={{ y: -1.5 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setUrlInput(sample.url);
+                    void inspectUrl(sample.url);
+                  }}
+                  className={`px-3 py-1.5 rounded-[var(--pr-r-pill)] text-xs font-medium border cursor-pointer transition-colors ${sample.expectedKind === 'blocked'
+                      ? 'border-[var(--pr-bad-rule)] bg-[var(--pr-bad-wash)] text-[var(--pr-bad)]'
+                      : 'border-[var(--pr-rule)] bg-[var(--pr-sunken)] text-[var(--pr-ink-2)] hover:text-[var(--pr-ink)] hover:border-[var(--pr-signal-rule)] hover:bg-[var(--pr-signal-wash)]'
+                    }`}
+                >
+                  {sample.label}
+                </motion.button>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {/* Results & Isolated Theater */}
       {loading ? (
-        <div className="pr-card p-6 sm:p-8 space-y-5">
+        <div className="pr-card pr-scan-beam p-6 sm:p-8 space-y-5">
           <div className="flex items-center gap-2.5">
             <Loader2 size={18} className="animate-spin text-[var(--pr-signal)]" aria-hidden="true" />
             <span className="pr-kicker">{t('hero.ctaInspecting')}</span>
@@ -633,30 +638,34 @@ export function VideoWorkbench({
                           {resolved.engine} · {formatDuration(resolved.durationSeconds ?? detectedDuration)}
                         </span>
                         {rawStreamSrc && resolved.privacyEmbedUrl && (
-                          <div className="inline-flex items-center rounded-[var(--pr-r-sm)] border border-[var(--pr-rule-2)] bg-[var(--pr-raised)] p-0.5 text-[11px]">
+                          <div className="inline-flex items-center rounded-[var(--pr-r-sm)] border border-[var(--pr-rule-2)] bg-[var(--pr-sunken)] p-0.5 text-[11px]">
                             <button
                               type="button"
                               onClick={() => setForceEmbedMode(false)}
-                              className={`px-2 py-0.5 rounded-[var(--pr-r-sm)] transition-colors ${
-                                !forceEmbedMode
-                                  ? 'bg-[var(--pr-pine)] text-[#F2F1EC] font-medium'
+                              className={`px-2.5 py-0.5 rounded-[var(--pr-r-sm)] cursor-pointer transition-colors ${!forceEmbedMode
+                                  ? 'bg-[var(--pr-signal)] text-[var(--pr-signal-ink)] font-semibold'
                                   : 'text-[var(--pr-ink-3)] hover:text-[var(--pr-ink)]'
-                              }`}
+                                }`}
                             >
                               Direct Stream
                             </button>
                             <button
                               type="button"
                               onClick={() => setForceEmbedMode(true)}
-                              className={`px-2 py-0.5 rounded-[var(--pr-r-sm)] transition-colors ${
-                                forceEmbedMode
-                                  ? 'bg-[var(--pr-pine)] text-[#F2F1EC] font-medium'
+                              className={`px-2.5 py-0.5 rounded-[var(--pr-r-sm)] cursor-pointer transition-colors ${forceEmbedMode
+                                  ? 'bg-[var(--pr-signal)] text-[var(--pr-signal-ink)] font-semibold'
                                   : 'text-[var(--pr-ink-3)] hover:text-[var(--pr-ink)]'
-                              }`}
+                                }`}
                             >
                               Original Embed
                             </button>
                           </div>
+                        )}
+                        {activeVariant && !streamFailed && (
+                          <span className="pr-badge pr-badge--good">
+                            <span className="pr-badge-dot" aria-hidden="true" />
+                            MP4 DOWNLOAD READY
+                          </span>
                         )}
                       </div>
                       <h2 className="pr-h3 truncate max-w-xl" title={resolved.title}>
@@ -697,11 +706,10 @@ export function VideoWorkbench({
                             key={v.id}
                             type="button"
                             onClick={() => setSelectedVariantId(v.id)}
-                            className={`px-2.5 py-1 rounded-[var(--pr-r-sm)] text-xs pr-mono border cursor-pointer ${
-                              active
+                            className={`px-2.5 py-1 rounded-[var(--pr-r-sm)] text-xs pr-mono border cursor-pointer ${active
                                 ? 'border-[var(--pr-signal)] bg-[var(--pr-signal-wash)] text-[var(--pr-signal)] font-semibold'
                                 : 'border-[var(--pr-rule)] bg-[var(--pr-sunken)] text-[var(--pr-ink-2)]'
-                            }`}
+                              }`}
                           >
                             {v.label}
                             {v.filesizeBytes ? ` · ${formatBytes(v.filesizeBytes, locale)}` : ''}
@@ -725,8 +733,8 @@ export function VideoWorkbench({
                           {savingVault
                             ? t('player.savingVault', { progress: saveProgress })
                             : savedVaultId
-                            ? t('player.savedVault')
-                            : t('player.saveVault')}
+                              ? t('player.savedVault')
+                              : t('player.saveVault')}
                         </span>
                       </button>
                     )}
@@ -737,8 +745,8 @@ export function VideoWorkbench({
                           activeVariant && !streamFailed
                             ? activeVariant.downloadUrl
                             : `/api/download?source=${encodeURIComponent(resolved.safety.sanitizedUrl)}&filename=${encodeURIComponent(
-                                `${resolved.title.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 48)}.mp4`
-                              )}`
+                              `${resolved.title.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 48)}.mp4`
+                            )}`
                         }
                         download
                         className="pr-btn pr-btn--secondary pr-btn--sm"
@@ -807,13 +815,12 @@ export function VideoWorkbench({
             <div className="flex items-center justify-between gap-2">
               <span className="pr-kicker">{t('shield.kicker')}</span>
               <span
-                className={`pr-badge ${
-                  resolved.safety.verdict === 'SAFE'
+                className={`pr-badge ${resolved.safety.verdict === 'SAFE'
                     ? 'pr-badge--good'
                     : resolved.safety.verdict === 'CAUTION'
-                    ? 'pr-badge--warn'
-                    : 'pr-badge--bad'
-                }`}
+                      ? 'pr-badge--warn'
+                      : 'pr-badge--bad'
+                  }`}
               >
                 <span className="pr-badge-dot" aria-hidden="true" />
                 {t(`shield.verdict.${resolved.safety.verdict}`)}
@@ -821,17 +828,22 @@ export function VideoWorkbench({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="pr-sunken p-3">
-                <span className="text-xs text-[var(--pr-ink-3)] block">
-                  {t('shield.scoreLabel')}
-                </span>
-                <span className="text-2xl font-semibold pr-mono text-[var(--pr-ink)]">
-                  {resolved.safety.score}
-                  <span className="text-xs text-[var(--pr-ink-3)]">/100</span>
-                </span>
+              <div className="pr-sunken p-3 flex items-center gap-3">
+                <AnimatedScoreRing
+                  score={resolved.safety.score}
+                  verdict={resolved.safety.verdict}
+                />
+                <div>
+                  <span className="text-xs text-[var(--pr-ink-3)] block">
+                    {t('shield.scoreLabel')}
+                  </span>
+                  <span className="pr-mono text-xs font-semibold text-[var(--pr-ink)]">
+                    {resolved.safety.score}/100
+                  </span>
+                </div>
               </div>
-              <div className="pr-sunken p-3">
-                <span className="text-xs text-[var(--pr-ink-3)] block">Kid-Safe</span>
+              <div className="pr-sunken p-3 flex flex-col justify-center">
+                <span className="text-xs text-[var(--pr-ink-3)] block">Ad-Free &amp; Accessible</span>
                 <span className="text-sm font-semibold text-[var(--pr-ink)] inline-flex items-center gap-1.5 mt-1">
                   {resolved.safety.kidSafe ? (
                     <>
@@ -876,13 +888,12 @@ export function VideoWorkbench({
                   className="p-2.5 rounded-[var(--pr-r-sm)] border border-[var(--pr-rule)] bg-[var(--pr-paper)] flex items-start gap-2.5 text-xs"
                 >
                   <span
-                    className={`pr-badge shrink-0 ${
-                      r.severity === 'pass'
+                    className={`pr-badge shrink-0 ${r.severity === 'pass'
                         ? 'pr-badge--good'
                         : r.severity === 'warn'
-                        ? 'pr-badge--warn'
-                        : 'pr-badge--bad'
-                    }`}
+                          ? 'pr-badge--warn'
+                          : 'pr-badge--bad'
+                      }`}
                   >
                     {r.severity}
                   </span>
@@ -917,12 +928,12 @@ export function VideoWorkbench({
                 {txPhase.kind === 'building'
                   ? t('ledger.txBuilding')
                   : txPhase.kind === 'signing'
-                  ? t('ledger.txSigning')
-                  : txPhase.kind === 'sent'
-                  ? t('ledger.txSent')
-                  : wallet.connected
-                  ? t('player.anchorChain')
-                  : `${t('ledger.walletConnect')} -> ${t('player.anchorChain')}`}
+                    ? t('ledger.txSigning')
+                    : txPhase.kind === 'sent'
+                      ? t('ledger.txSent')
+                      : wallet.connected
+                        ? t('player.anchorChain')
+                        : `${t('ledger.walletConnect')} -> ${t('player.anchorChain')}`}
               </button>
 
               {txPhase.kind !== 'idle' && (
@@ -934,10 +945,10 @@ export function VideoWorkbench({
                     {txPhase.kind === 'confirmed'
                       ? t('ledger.txConfirmed')
                       : txPhase.kind === 'finalized'
-                      ? t('ledger.txFinalized')
-                      : txPhase.kind === 'failed'
-                      ? txPhase.message
-                      : t('ledger.txSent')}
+                        ? t('ledger.txFinalized')
+                        : txPhase.kind === 'failed'
+                          ? txPhase.message
+                          : t('ledger.txSent')}
                   </p>
                   {'signature' in txPhase && txPhase.signature && (
                     <a

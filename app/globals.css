@@ -246,6 +246,47 @@ body {
   border: 1px solid var(--pr-rule);
   border-radius: var(--pr-r-lg);
   box-shadow: var(--pr-e1), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  transition:
+    border-color var(--pr-d-fast) var(--pr-ease),
+    box-shadow var(--pr-d) var(--pr-ease),
+    transform var(--pr-d) var(--pr-ease);
+}
+
+.pr-card--interactive:hover {
+  border-color: var(--pr-rule-2);
+  box-shadow: var(--pr-e2), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  transform: translateY(-2px);
+}
+
+@keyframes pr-scan-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.pr-scan-beam {
+  position: relative;
+  overflow: hidden;
+}
+
+.pr-scan-beam::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 28%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pr-signal) 22%, transparent), transparent);
+  animation: pr-scan-sweep 1.8s var(--pr-ease) infinite;
+  pointer-events: none;
+}
+
+.pr-chip-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 :root[data-theme='dark'] .pr-card {

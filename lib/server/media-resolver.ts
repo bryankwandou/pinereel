@@ -449,7 +449,7 @@ async function resolveDirectMedia(url: string, safety: SafetyReport): Promise<Re
           Range: 'bytes=0-0',
         },
       });
-      await res.body?.cancel().catch(() => {});
+      await res.body?.cancel().catch(() => { });
     }
     clearTimeout(timer);
 
@@ -588,6 +588,35 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
   let keywords: string[] | undefined;
   const variants: MediaStreamVariant[] = [];
 
+  const visitorData = watchHtml?.match(/"visitorData"\s*:\s*"([^"]+)"/)?.[1] || '';
+  const apiKey = watchHtml?.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/)?.[1] || '';
+
+  const pushYtFormat = (
+    id: string,
+    label: string,
+    directUrl: string,
+    ext: string,
+    qualityHeight: number | null,
+    hasAudio: boolean,
+    filesizeBytes: number | null
+  ) => {
+    if (!/^https?:/i.test(directUrl) || variants.some((v) => v.url === directUrl)) return;
+    variants.push({
+      id,
+      label,
+      ext,
+      url: directUrl,
+      proxyUrl: buildProxyUrl(directUrl, url),
+      downloadUrl: buildDownloadUrl(directUrl, title, ext, url),
+      qualityHeight,
+      hasAudio,
+      hasVideo: true,
+      filesizeBytes,
+      mimeType: `video/${ext}`,
+      isHls: false,
+    });
+  };
+
   if (watchHtml) {
     const m = watchHtml.match(/ytInitialPlayerResponse\s*=\s*(\{[\s\S]+?\});\s*(?:var|const|let|<\/script>)/);
     if (m) {
@@ -622,25 +651,142 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
         for (const f of pr.streamingData?.formats ?? []) {
           if (f.url && /^https?:/i.test(f.url)) {
             const ext = f.mimeType?.includes('webm') ? 'webm' : 'mp4';
-            variants.push({
-              id: `yt-${f.itag ?? variants.length}`,
-              label: `${f.height ?? 360}p ${ext.toUpperCase()}`,
+            pushYtFormat(
+              `yt-web-${f.itag ?? variants.length}`,
+              `${f.height ?? 360}p ${ext.toUpperCase()}`,
+              f.url,
               ext,
-              url: f.url,
-              proxyUrl: buildProxyUrl(f.url),
-              downloadUrl: buildDownloadUrl(f.url, title, ext, url),
-              qualityHeight: f.height ?? null,
-              hasAudio: true,
-              hasVideo: true,
-              filesizeBytes: f.contentLength ? Number(f.contentLength) : null,
-              mimeType: `video/${ext}`,
-              isHls: false,
-            });
+              f.height ?? null,
+              true,
+              f.contentLength ? Number(f.contentLength) : null
+            );
           }
         }
       } catch {
-        // Fallback to oEmbed + privacy embed
+        // Continue to InnerTube & Piped cloud extractors
       }
+    }
+  }
+
+  // 1. Direct YouTube InnerTube ANDROID client (returns progressive muxed MP4 with audio + HD adaptive MP4s)
+  if (variants.length === 0) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5500);
+      const androidUa = 'com.google.android.youtube/20.10.38 (Linux; U; Android 15) gzip';
+      const endpoint = apiKey
+        ? `https://www.youtube.com/youtubei/v1/player?key=${encodeURIComponent(apiKey)}&prettyPrint=false`
+        : 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+      const ir = await fetch(endpoint, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': androidUa,
+          'X-YouTube-Client-Name': '3',
+          'X-YouTube-Client-Version': '20.10.38',
+          ...(visitorData ? { 'X-Goog-Visitor-Id': visitorData } : {}),
+        },
+        body: JSON.stringify({
+          videoId,
+          context: {
+            client: {
+              clientName: 'ANDROID',
+              clientVersion: '20.10.38',
+              androidSdkVersion: 35,
+              hl: 'en',
+              gl: 'US',
+              ...(visitorData ? { visitorData } : {}),
+            },
+          },
+          contentCheckOk: true,
+          racyCheckOk: true,
+        }),
+      }).finally(() => clearTimeout(timer));
+
+      if (ir.ok) {
+        const d = (await ir.json().catch(() => null)) as {
+          videoDetails?: { title?: string; author?: string; lengthSeconds?: string };
+          streamingData?: {
+            formats?: { itag?: number; url?: string; mimeType?: string; height?: number; contentLength?: string }[];
+          };
+        } | null;
+
+        if (d?.videoDetails?.title) title = d.videoDetails.title;
+        if (d?.videoDetails?.author) author = d.videoDetails.author;
+        if (d?.videoDetails?.lengthSeconds && !durationSeconds) {
+          durationSeconds = Number(d.videoDetails.lengthSeconds);
+        }
+
+        const progFormats = (d?.streamingData?.formats ?? [])
+          .filter((f) => f.url && f.mimeType?.includes('mp4'))
+          .sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
+
+        for (const f of progFormats) {
+          if (!f.url) continue;
+          const okStream = await verifyDirectStreamCandidate(f.url, undefined, 0, androidUa);
+          if (okStream) {
+            pushYtFormat(
+              `yt-and-${f.itag ?? variants.length}`,
+              `${f.height ?? 360}p MP4 (Audio+Video)`,
+              f.url,
+              'mp4',
+              f.height ?? 360,
+              true,
+              f.contentLength ? Number(f.contentLength) : null
+            );
+          }
+        }
+      }
+    } catch {
+      // Fall through to Piped cloud extractor
+    }
+  }
+
+  // 2. Cloud Piped API fallback (bypasses datacenter IP rate-limits and provides verified muxed MP4 streams)
+  if (variants.length === 0) {
+    const pipedEndpoints = ['https://api.piped.private.coffee'];
+    for (const host of pipedEndpoints) {
+      const pd = await fetchJsonWithTimeout<{
+        title?: string;
+        uploader?: string;
+        duration?: number;
+        videoStreams?: {
+          url?: string;
+          quality?: string;
+          mimeType?: string;
+          videoOnly?: boolean;
+          height?: number;
+          contentLength?: number;
+        }[];
+      }>(`${host}/streams/${encodeURIComponent(videoId)}`, 6000);
+
+      if (!pd) continue;
+      if (pd.title) title = pd.title;
+      if (pd.uploader) author = pd.uploader;
+      if (pd.duration && !durationSeconds) durationSeconds = pd.duration;
+
+      const muxed = (pd.videoStreams ?? []).filter(
+        (s) => s.url && !s.videoOnly && (s.mimeType?.includes('mp4') || s.quality?.toLowerCase().includes('p'))
+      );
+
+      for (const s of muxed) {
+        if (!s.url) continue;
+        const okStream = await verifyDirectStreamCandidate(s.url, undefined, 0);
+        if (okStream) {
+          const h = s.height ?? (parseInt(s.quality || '', 10) || 720);
+          pushYtFormat(
+            `yt-piped-${variants.length}`,
+            `${s.quality || `${h}p`} MP4`,
+            s.url,
+            'mp4',
+            h,
+            true,
+            s.contentLength && s.contentLength > 0 ? s.contentLength : null
+          );
+        }
+      }
+      if (variants.length > 0) break;
     }
   }
 
@@ -668,8 +814,8 @@ async function resolveYouTubeCloud(url: string, safety: SafetyReport): Promise<R
     offlineCapable: variants.length > 0 || ytdlpAvail,
     offlineNote:
       variants.length > 0
-        ? 'Direct ad-free YouTube stream resolved for offline Mountain Vault caching.'
-        : 'Privacy-isolated youtube-nocookie playback active in cloud mode. Run PineReel locally with yt-dlp for direct MP4 offline vault downloads.',
+        ? 'Direct ad-free YouTube MP4 resolved for instant download and offline Mountain Vault caching.'
+        : 'Privacy-isolated youtube-nocookie playback active in cloud mode.',
     ytdlpAvailable: ytdlpAvail,
   };
 }
@@ -956,39 +1102,121 @@ async function resolveInstagramCloud(url: string, safety: SafetyReport): Promise
   if (!ig) return null;
 
   const embedPath = `https://www.instagram.com/${ig.kind}/${ig.code}/embed/`;
-  const embedHtml = await fetchTextBounded(`${embedPath}captioned/`);
+  const eeUrl = `https://www.eeinstagram.com/${ig.kind}/${ig.code}/`;
+
+  const [embedHtml, eeHtml] = await Promise.all([
+    fetchTextBounded(`${embedPath}captioned/`),
+    (async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5500);
+        const r = await fetch(eeUrl, {
+          signal: ctrl.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)',
+            Accept: 'text/html',
+          },
+        }).finally(() => clearTimeout(timer));
+        return r.ok ? await r.text() : null;
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
 
   const variants: MediaStreamVariant[] = [];
   let title = `Instagram ${ig.kind === 'reel' ? 'Reel' : 'Video'} (${ig.code})`;
+  let author = 'Instagram';
   let thumb: string | null = null;
 
-  if (embedHtml) {
-    const vidMatch =
-      embedHtml.match(/"video_url"\s*:\s*"([^"]+)"/) ||
-      embedHtml.match(/<video[^>]+src=["']([^"']+)["']/i);
-    if (vidMatch?.[1]) {
-      const cleanVid = vidMatch[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-      if (/^https?:/i.test(cleanVid)) {
-        variants.push({
-          id: 'ig-mp4',
-          label: 'Direct MP4',
-          ext: 'mp4',
-          url: cleanVid,
-          proxyUrl: buildProxyUrl(cleanVid),
-          downloadUrl: buildDownloadUrl(cleanVid, title, 'mp4', url),
-          qualityHeight: null,
-          hasAudio: true,
-          hasVideo: true,
-          filesizeBytes: null,
-          mimeType: 'video/mp4',
-          isHls: false,
-        });
+  // 1. Primary Instagram MP4 extractor via og:video + 302 CDN resolution (yields direct scontent.cdninstagram.com MP4 with audio!)
+  if (eeHtml) {
+    const eeAuthor = extractMetaTag(eeHtml, 'twitter:title');
+    if (eeAuthor) author = eeAuthor;
+    const eeDesc = extractMetaTag(eeHtml, 'og:description');
+    if (eeDesc?.trim()) title = eeDesc.trim().split('\n')[0].slice(0, 96);
+    const eeImg = extractMetaTag(eeHtml, 'og:image');
+    if (eeImg && /^https?:/i.test(eeImg)) thumb = eeImg;
+
+    const rawEeVid =
+      extractMetaTag(eeHtml, 'og:video:secure_url') ||
+      extractMetaTag(eeHtml, 'og:video') ||
+      extractMetaTag(eeHtml, 'twitter:player:stream');
+    if (rawEeVid) {
+      try {
+        let resolvedVid = new URL(rawEeVid, eeUrl).toString();
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4500);
+        const redir = await fetch(resolvedVid, {
+          redirect: 'manual',
+          signal: ctrl.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+          },
+        }).finally(() => clearTimeout(timer));
+        const loc = redir.headers.get('location');
+        if (loc && /^https?:/i.test(loc)) {
+          resolvedVid = loc;
+        }
+        const okStream = await verifyDirectStreamCandidate(resolvedVid);
+        if (okStream) {
+          variants.push({
+            id: 'ig-hd-mp4',
+            label: 'HD MP4 (Audio+Video)',
+            ext: 'mp4',
+            url: resolvedVid,
+            proxyUrl: buildProxyUrl(resolvedVid, url),
+            downloadUrl: buildDownloadUrl(resolvedVid, title, 'mp4', url),
+            qualityHeight: 1080,
+            hasAudio: true,
+            hasVideo: true,
+            filesizeBytes: null,
+            mimeType: 'video/mp4',
+            isHls: false,
+          });
+        }
+      } catch {
+        // Fall through to embed/captioned check
       }
     }
-    const imgMatch = embedHtml.match(/class="EmbeddedMediaImage"[^>]+src="([^"]+)"/i);
-    if (imgMatch?.[1]) thumb = decodeHtmlEntities(imgMatch[1]);
-    const capMatch = embedHtml.match(/class="Caption"[^>]*>([\s\S]{1,120}?)</i);
-    if (capMatch?.[1]?.trim()) title = capMatch[1].trim();
+  }
+
+  // 2. Parallel fallback via instagram.com/embed/captioned/
+  if (embedHtml) {
+    if (variants.length === 0) {
+      const vidMatch =
+        embedHtml.match(/"video_url"\s*:\s*"([^"]+)"/) ||
+        embedHtml.match(/\\"video_url\\":\\"([^\\"]+)\\"/) ||
+        embedHtml.match(/<video[^>]+src=["']([^"']+)["']/i);
+      if (vidMatch?.[1]) {
+        const cleanVid = vidMatch[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+        if (/^https?:/i.test(cleanVid) && (await verifyDirectStreamCandidate(cleanVid))) {
+          variants.push({
+            id: 'ig-mp4',
+            label: 'Direct MP4',
+            ext: 'mp4',
+            url: cleanVid,
+            proxyUrl: buildProxyUrl(cleanVid, url),
+            downloadUrl: buildDownloadUrl(cleanVid, title, 'mp4', url),
+            qualityHeight: 720,
+            hasAudio: true,
+            hasVideo: true,
+            filesizeBytes: null,
+            mimeType: 'video/mp4',
+            isHls: false,
+          });
+        }
+      }
+    }
+    if (!thumb) {
+      const imgMatch = embedHtml.match(/class="EmbeddedMediaImage"[^>]+src="([^"]+)"/i);
+      if (imgMatch?.[1]) thumb = decodeHtmlEntities(imgMatch[1]);
+    }
+    if (title.startsWith('Instagram ')) {
+      const capMatch = embedHtml.match(/class="Caption"[^>]*>([\s\S]{1,120}?)</i);
+      if (capMatch?.[1]?.trim()) title = capMatch[1].trim();
+    }
   }
 
   const updatedSafety = classifyMetadataSafety(safety, { title });
@@ -999,7 +1227,7 @@ async function resolveInstagramCloud(url: string, safety: SafetyReport): Promise
     engine: 'cloud-extractor',
     safety: updatedSafety,
     title,
-    author: 'Instagram',
+    author,
     durationSeconds: null,
     thumbnailUrl: thumb,
     streams: variants,
@@ -1008,8 +1236,8 @@ async function resolveInstagramCloud(url: string, safety: SafetyReport): Promise
     offlineCapable: variants.length > 0 || (await isYtdlpAvailable()),
     offlineNote:
       variants.length > 0
-        ? 'Direct Instagram MP4 extracted without trackers; ready for offline Mountain Vault.'
-        : 'Isolated Instagram embed active without ad popups. Run local yt-dlp runtime for direct MP4 download.',
+        ? 'Direct Instagram MP4 extracted without login or trackers; ready for instant download and Mountain Vault.'
+        : 'Isolated Instagram embed active without ad popups.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
 }
@@ -1131,15 +1359,100 @@ async function resolveStreamableCloud(url: string, safety: SafetyReport): Promis
 async function resolveVimeoCloud(url: string, safety: SafetyReport): Promise<ResolvedMedia | null> {
   const id = extractVimeoId(url);
   if (!id) return null;
-  const oembed = await fetchJsonWithTimeout<{
-    title?: string;
-    author_name?: string;
-    duration?: number;
-    thumbnail_url?: string;
-  }>(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`);
+  const [oembed, playerHtml] = await Promise.all([
+    fetchJsonWithTimeout<{
+      title?: string;
+      author_name?: string;
+      duration?: number;
+      thumbnail_url?: string;
+    }>(`https://vimeo.com/api/oembed.json?url=${encodeURIComponent(url)}`),
+    (async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 5500);
+        const r = await fetch(`https://player.vimeo.com/video/${id}`, {
+          signal: ctrl.signal,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            Referer: 'https://vimeo.com/',
+          },
+        }).finally(() => clearTimeout(timer));
+        return r.ok ? await r.text() : null;
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
 
   const title = oembed?.title || `Vimeo Video (${id})`;
+  const variants: MediaStreamVariant[] = [];
+
+  if (playerHtml) {
+    const cfgStr = playerHtml.match(/window\.playerConfig\s*=\s*(\{[\s\S]*?\})\s*<\/script>/)?.[1];
+    if (cfgStr) {
+      try {
+        const cfg = JSON.parse(cfgStr) as {
+          request?: {
+            files?: {
+              progressive?: { url?: string; quality?: string; height?: number }[];
+              hls?: { cdns?: Record<string, { url?: string; avc_url?: string }> };
+            };
+          };
+        };
+        const progressive = (cfg.request?.files?.progressive ?? []).sort(
+          (a, b) => (b.height ?? 0) - (a.height ?? 0)
+        );
+        for (const p of progressive) {
+          if (p.url && /^https?:/i.test(p.url)) {
+            variants.push({
+              id: `vm-mp4-${variants.length}`,
+              label: `${p.quality || `${p.height ?? 720}p`} MP4`,
+              ext: 'mp4',
+              url: p.url,
+              proxyUrl: buildProxyUrl(p.url, url),
+              downloadUrl: buildDownloadUrl(p.url, title, 'mp4', url),
+              qualityHeight: p.height ?? null,
+              hasAudio: true,
+              hasVideo: true,
+              filesizeBytes: null,
+              mimeType: 'video/mp4',
+              isHls: false,
+            });
+          }
+        }
+        if (variants.length === 0) {
+          const cdns = cfg.request?.files?.hls?.cdns ?? {};
+          const avc =
+            cdns.akfire_interconnect_quic?.avc_url ||
+            cdns.fastly_skyfire?.avc_url ||
+            Object.values(cdns)[0]?.avc_url ||
+            Object.values(cdns)[0]?.url;
+          if (avc && /^https?:/i.test(avc)) {
+            variants.push({
+              id: 'vm-hls-mp4',
+              label: 'HD Video Stream (MP4/HLS)',
+              ext: 'mp4',
+              url: avc,
+              proxyUrl: buildProxyUrl(avc, url),
+              downloadUrl: buildDownloadUrl(avc, title, 'mp4', url),
+              qualityHeight: 1080,
+              hasAudio: true,
+              hasVideo: true,
+              filesizeBytes: null,
+              mimeType: 'application/vnd.apple.mpegurl',
+              isHls: true,
+            });
+          }
+        }
+      } catch {
+        // Fallback to DNT embed
+      }
+    }
+  }
+
   const updatedSafety = classifyMetadataSafety(safety, { title });
+  const preferred = variants.find((v) => !v.isHls) ?? variants[0] ?? null;
 
   return {
     ok: true,
@@ -1149,11 +1462,14 @@ async function resolveVimeoCloud(url: string, safety: SafetyReport): Promise<Res
     author: oembed?.author_name || 'Vimeo Creator',
     durationSeconds: oembed?.duration ?? null,
     thumbnailUrl: oembed?.thumbnail_url ?? null,
-    streams: [],
-    preferredStreamUrl: null,
+    streams: variants,
+    preferredStreamUrl: preferred ? preferred.proxyUrl : null,
     privacyEmbedUrl: `https://player.vimeo.com/video/${id}?dnt=1&title=0&byline=0&portrait=0`,
-    offlineCapable: await isYtdlpAvailable(),
-    offlineNote: 'DNT-isolated Vimeo playback active; run local yt-dlp engine for direct MP4 downloads.',
+    offlineCapable: variants.some((v) => !v.isHls) || (await isYtdlpAvailable()),
+    offlineNote:
+      variants.length > 0
+        ? 'Ad-free Vimeo video stream resolved for playback and direct video download.'
+        : 'DNT-isolated Vimeo playback active.',
     ytdlpAvailable: await isYtdlpAvailable(),
   };
 }
@@ -1273,16 +1589,18 @@ async function resolveRedditCloud(url: string, safety: SafetyReport): Promise<Re
 async function verifyDirectStreamCandidate(
   candidateUrl: string,
   refererPageUrl?: string,
-  minSizeBytes = 0
+  minSizeBytes = 0,
+  customUserAgent?: string
 ): Promise<boolean> {
   try {
     await assertSafeRemoteUrl(candidateUrl);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3800);
-    const headers: Record<string, string> = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    };
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const ua =
+      customUserAgent ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    const baseHeaders: Record<string, string> = { 'User-Agent': ua };
+    const headers: Record<string, string> = { ...baseHeaders };
     if (refererPageUrl) {
       try {
         const ref = new URL(refererPageUrl);
@@ -1302,9 +1620,17 @@ async function verifyDirectStreamCandidate(
       res = await fetch(candidateUrl, {
         method: 'GET',
         signal: controller.signal,
-        headers: { ...headers, Range: 'bytes=0-511' },
+        headers: { ...headers, Range: 'bytes=0-1023' },
       });
-      await res.body?.cancel().catch(() => {});
+      await res.body?.cancel().catch(() => { });
+    }
+    if (res.status === 403 && refererPageUrl) {
+      res = await fetch(candidateUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { ...baseHeaders, Range: 'bytes=0-1023' },
+      });
+      await res.body?.cancel().catch(() => { });
     }
     clearTimeout(timer);
 
@@ -1383,7 +1709,12 @@ async function searchYouTubeVideoIdAccurate(query: string): Promise<string | nul
       `https://video.search.yahoo.com/search/video?p=${encodeURIComponent(cleanQuery)}`
     );
     if (yhHtml) {
-      const decodedYh = decodeURIComponent(yhHtml.replace(/&quot;/g, '"').replace(/&amp;/g, '&'));
+      const decodedYh = yhHtml
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/%2F/gi, '/')
+        .replace(/%3F/gi, '?')
+        .replace(/%3D/gi, '=');
       const yhVid = decodedYh.match(/youtube\.com\/watch\?v=([a-zA-Z0-9_-]{11})/)?.[1];
       if (yhVid) return yhVid;
     }
@@ -1419,9 +1750,9 @@ async function resolveBingMidExactVideoUrl(
     const cookies =
       typeof bRes.headers.getSetCookie === 'function'
         ? bRes.headers
-            .getSetCookie()
-            .map((c) => c.split(';')[0])
-            .join('; ')
+          .getSetCookie()
+          .map((c) => c.split(';')[0])
+          .join('; ')
         : bRes.headers.get('set-cookie') || '';
     const rawHtml = await bRes.text();
     const decoded = rawHtml.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
@@ -1916,6 +2247,21 @@ async function resolveAnyWebVideoPage(
     candidateUrls.push({ url: jsonLdContentUrls[0], authoritative: true });
   }
 
+  // Structured player config extraction for external media sites (TED, W3Schools, JWPlayer, Video.js, Plyr, etc.)
+  const structuredPlayerUrls = new Set<string>();
+  for (const cfgMatch of html.matchAll(
+    /(?:file|src|mp4|mp4Url|videoUrl|video_url|streamUrl|mediaUrl|playbackUrl|hd_url|sd_url|fallback|downloadUrl|contentUrl)["']?\s*[:=]\s*["']((?:https?:\/\/|\/)[^"'\s<>\\]+\.(?:mp4|webm|m4v|mov|m3u8)(?:\?[^"'\s<>\\]*)?)["']/gi
+  )) {
+    const raw = decodeHtmlEntities(cfgMatch[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/'));
+    if (!PREVIEW_OR_DECO_MEDIA_RE.test(raw)) {
+      structuredPlayerUrls.add(raw);
+    }
+    if (structuredPlayerUrls.size >= 4) break;
+  }
+  for (const su of structuredPlayerUrls) {
+    candidateUrls.push({ url: su, authoritative: false });
+  }
+
   const rawTitleTag = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
   const title =
     extractMetaTag(html, 'og:title') ||
@@ -1987,10 +2333,24 @@ async function resolveAnyWebVideoPage(
   let embedFallback: string | null = null;
   const ytEmbed = html.match(/https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{11})/);
   if (ytEmbed?.[1]) {
+    if (variants.length === 0) {
+      const ytEmbedded = await resolveYouTubeCloud(
+        `https://www.youtube.com/watch?v=${ytEmbed[1]}`,
+        updatedSafety
+      );
+      if (ytEmbedded && ytEmbedded.streams.length > 0) return ytEmbedded;
+    }
     embedFallback = `https://www.youtube-nocookie.com/embed/${ytEmbed[1]}?rel=0&modestbranding=1&iv_load_policy=3`;
   } else {
     const vmEmbed = html.match(/https:\/\/player\.vimeo\.com\/video\/(\d+)/);
     if (vmEmbed?.[1]) {
+      if (variants.length === 0) {
+        const vmEmbedded = await resolveVimeoCloud(
+          `https://vimeo.com/${vmEmbed[1]}`,
+          updatedSafety
+        );
+        if (vmEmbedded && vmEmbedded.streams.length > 0) return vmEmbedded;
+      }
       embedFallback = `https://player.vimeo.com/video/${vmEmbed[1]}?dnt=1`;
     } else {
       const jsonEmbed = html.match(/"embedUrl"\s*:\s*"([^"]+)"/i)?.[1]?.replace(/\\\//g, '/');

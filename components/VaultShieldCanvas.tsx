@@ -64,23 +64,23 @@ function StreamPackets({
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const groupRef = useRef<THREE.Group>(null);
   const gateGroupRef = useRef<THREE.Group>(null);
-  const coreRef = useRef<THREE.Mesh>(null);
+  const coreRef = useRef<THREE.Group>(null);
   const { invalidate, pointer } = useThree();
 
   const packets = useMemo<PacketSpec[]>(() => {
     const out: PacketSpec[] = [];
-    const count = 72;
+    const count = 1024;
     for (let i = 0; i < count; i++) {
       const h1 = Math.abs(Math.sin((i + 1) * 12.9898) * 43758.5453) % 1;
       const h2 = Math.abs(Math.sin((i + 1) * 78.233) * 19341.123) % 1;
       const kind: PacketSpec['kind'] =
-        i % 5 === 0 ? 'threat' : i % 5 === 1 ? 'tracker' : 'safe';
+        i % 6 === 0 ? 'threat' : i % 6 === 1 ? 'tracker' : 'safe';
       out.push({
         phase: i / count,
-        laneY: (h1 - 0.5) * 2.2,
-        laneZ: (h2 - 0.5) * 2.1,
+        laneY: (h1 - 0.5) * 2.55,
+        laneZ: (h2 - 0.5) * 2.45,
         kind,
-        speed: 0.14 + (i % 5) * 0.022,
+        speed: 0.11 + (i % 7) * 0.019,
         phi: Math.acos(1 - (2 * (i + 0.5)) / count),
         theta: Math.PI * (1 + Math.sqrt(5)) * i,
       });
@@ -88,7 +88,7 @@ function StreamPackets({
     return out;
   }, []);
 
-  const geometry = useMemo(() => new THREE.SphereGeometry(0.115, 16, 16), []);
+  const geometry = useMemo(() => new THREE.SphereGeometry(0.048, 8, 8), []);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
   useEffect(() => {
@@ -205,36 +205,48 @@ function StreamPackets({
     <group ref={groupRef}>
       <MountainRidgeWire active={mode === 'vault'} />
 
-      {/* Three hexagonal geometric filter gates rotated orthogonal to stream axis */}
+      {/* Five hexagonal geometric filter gates rotated orthogonal to stream axis */}
       <group ref={gateGroupRef} position={[-0.25, 0, 0]}>
-        {[-0.55, 0, 0.55].map((xPos, idx) => (
-          <mesh key={idx} position={[xPos, 0, 0]} rotation={[0, Math.PI / 2, idx * 0.4]}>
-            <torusGeometry args={[1.45 - idx * 0.14, 0.03, 12, 6]} />
+        {[-0.9, -0.45, 0, 0.45, 0.9].map((xPos, idx) => (
+          <mesh key={idx} position={[xPos, 0, 0]} rotation={[0, Math.PI / 2, idx * 0.35]}>
+            <torusGeometry args={[1.55 - idx * 0.11, 0.024, 12, 6]} />
             <meshStandardMaterial
               color={idx === 0 && mode === 'intercept' ? STAGE_PALETTE.warn : STAGE_PALETTE.signal}
               emissive={idx === 0 && mode === 'intercept' ? STAGE_PALETTE.warn : STAGE_PALETTE.signal}
-              emissiveIntensity={0.4}
-              roughness={0.25}
-              metalness={0.5}
+              emissiveIntensity={0.45}
+              roughness={0.22}
+              metalness={0.55}
               transparent
-              opacity={mode === 'vault' ? 0.2 : 0.85}
+              opacity={mode === 'vault' ? 0.22 : 0.85}
             />
           </mesh>
         ))}
       </group>
 
-      {/* Alpine crystal core representing verified stream or offline encrypted bundle */}
-      <mesh ref={coreRef} position={[1.45, 0.06, 0]}>
-        <icosahedronGeometry args={[mode === 'vault' ? 0.72 : 0.5, 0]} />
-        <meshStandardMaterial
-          color={STAGE_PALETTE.signal}
-          emissive={STAGE_PALETTE.signal}
-          emissiveIntensity={0.35}
-          wireframe={mode !== 'vault'}
-          roughness={0.2}
-          metalness={0.6}
-        />
-      </mesh>
+      {/* Dual-layer Alpine crystal core representing verified MP4 stream or offline encrypted bundle */}
+      <group ref={coreRef} position={[1.55, 0.06, 0]}>
+        <mesh>
+          <icosahedronGeometry args={[mode === 'vault' ? 0.76 : 0.56, 0]} />
+          <meshStandardMaterial
+            color={STAGE_PALETTE.signal}
+            emissive={STAGE_PALETTE.signal}
+            emissiveIntensity={0.4}
+            wireframe
+            roughness={0.2}
+            metalness={0.65}
+          />
+        </mesh>
+        <mesh>
+          <octahedronGeometry args={[mode === 'vault' ? 0.44 : 0.31, 0]} />
+          <meshStandardMaterial
+            color={STAGE_PALETTE.good}
+            emissive={STAGE_PALETTE.signal}
+            emissiveIntensity={0.55}
+            roughness={0.18}
+            metalness={0.7}
+          />
+        </mesh>
+      </group>
 
       <instancedMesh ref={meshRef} args={[geometry, undefined, packets.length]}>
         <meshStandardMaterial roughness={0.22} metalness={0.25} />
@@ -291,8 +303,8 @@ export default function VaultShieldCanvas({ mode }: { mode: SimMode }) {
           {mode === 'intercept'
             ? 'DEFLECTING TRACKERS + LURES'
             : mode === 'vault'
-            ? '0-SIGNAL VAULT GEOMETRY'
-            : 'AD-FREE STREAM TUNNEL'}
+              ? '0-SIGNAL VAULT GEOMETRY'
+              : 'AD-FREE STREAM TUNNEL'}
         </span>
       </div>
 
@@ -315,9 +327,9 @@ export default function VaultShieldCanvas({ mode }: { mode: SimMode }) {
       </div>
 
       <div className="px-4 py-2 border-t border-[#243830] bg-[#101c18] flex items-center justify-between text-[11px] pr-mono text-[#929e98]">
-        <span>72 STREAM NODES · POINTER TILT</span>
+        <span>1,024 GPU STREAM NODES · 5 GATES</span>
         <span className="text-[#f2f1ec]">
-          {mode === 'intercept' ? 'AD WRAPPERS ISOLATED' : mode === 'vault' ? 'INDEXEDDB SHA-256' : 'HTTPS RANGE PROXY'}
+          {mode === 'intercept' ? 'AD WRAPPERS ISOLATED' : mode === 'vault' ? 'INDEXEDDB SHA-256' : 'DIRECT MP4 ENGINE'}
         </span>
       </div>
     </div>

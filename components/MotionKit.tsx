@@ -371,13 +371,13 @@ export function ScrollRise({
 }
 
 const CYCLING_SOURCES = [
-  'YouTube 4K & Shorts',
-  'X (Twitter) Video',
-  'Instagram Reels',
-  'TikTok No-Watermark',
-  'Sonacast & Web Apps',
-  'Reddit & Vimeo',
-  'Direct MP4 & HLS .m3u8',
+  'YouTube MP4 & Shorts',
+  'Instagram Reels MP4',
+  'X (Twitter) HD MP4',
+  'TikTok No-Watermark MP4',
+  'Facebook & LinkedIn MP4',
+  'TED & External Web MP4',
+  'Vimeo, Reddit & HLS',
 ];
 
 export function LiveSourceFlipper() {
@@ -455,5 +455,133 @@ export function PerspectiveTiltCard({
         {children}
       </motion.div>
     </div>
+  );
+}
+
+export function AnimatedScoreRing({
+  score,
+  verdict,
+}: {
+  score: number;
+  verdict: 'SAFE' | 'CAUTION' | 'BLOCKED';
+}) {
+  const reduce = useSafeReducedMotion();
+  const radius = 26;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, score));
+  const offset = circumference - (clamped / 100) * circumference;
+  const strokeColor =
+    verdict === 'SAFE'
+      ? 'var(--pr-good)'
+      : verdict === 'CAUTION'
+        ? 'var(--pr-warn)'
+        : 'var(--pr-bad)';
+
+  return (
+    <div className="relative inline-flex items-center justify-center w-16 h-16 shrink-0">
+      <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64" aria-hidden="true">
+        <circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          stroke="var(--pr-rule)"
+          strokeWidth="4.5"
+        />
+        <motion.circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="4.5"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          initial={reduce ? { strokeDashoffset: offset } : { strokeDashoffset: circumference }}
+          animate={{ strokeDashoffset: offset }}
+          transition={reduce ? { duration: 0.01 } : { duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center pr-mono text-sm font-semibold text-[var(--pr-ink)]">
+        {clamped}
+      </span>
+    </div>
+  );
+}
+
+export function KineticBeamDivider({ className = '' }: { className?: string }) {
+  const reduce = useSafeReducedMotion();
+  return (
+    <div
+      aria-hidden="true"
+      className={`relative h-px w-full bg-[var(--pr-rule)] overflow-hidden ${className}`}
+    >
+      {!reduce && (
+        <motion.span
+          className="absolute top-0 left-0 h-full w-40"
+          style={{
+            background:
+              'linear-gradient(90deg, transparent, var(--pr-signal), transparent)',
+          }}
+          animate={{ x: ['-160px', '1280px'] }}
+          transition={{ duration: 4.8, repeat: Infinity, ease: 'linear', repeatDelay: 1.5 }}
+        />
+      )}
+    </div>
+  );
+}
+
+export function StaggerGroup({
+  children,
+  className = '',
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  const reduce = useSafeReducedMotion();
+  if (reduce) {
+    return <div className={className}>{children}</div>;
+  }
+  return (
+    <motion.div
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, amount: 0.1 }}
+      variants={{
+        hidden: {},
+        visible: { transition: { staggerChildren: 0.055 } },
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+export function StaggerItem({
+  children,
+  className = '',
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  const reduce = useSafeReducedMotion();
+  if (reduce) {
+    return <div className={className}>{children}</div>;
+  }
+  return (
+    <motion.div
+      variants={{
+        hidden: { opacity: 0.82, y: 12 },
+        visible: {
+          opacity: 1,
+          y: 0,
+          transition: { duration: 0.36, ease: [0.22, 1, 0.36, 1] },
+        },
+      }}
+      className={className}
+    >
+      {children}
+    </motion.div>
   );
 }

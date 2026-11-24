@@ -6,17 +6,18 @@
  */
 
 const PLATFORM_ITEMS = [
-  { label: 'YouTube', tag: 'Ad-free nocookie + yt-dlp' },
-  { label: 'X (Twitter)', tag: 'Direct MP4 variants' },
-  { label: 'Instagram', tag: 'Reels + Outlink unwrap' },
-  { label: 'TikTok', tag: 'No-watermark MP4' },
-  { label: 'Reddit', tag: 'JSON video + HLS' },
-  { label: 'Vimeo', tag: 'DNT clean playback' },
+  { label: 'YouTube', tag: 'Direct MP4 + InnerTube/Piped' },
+  { label: 'Instagram Reels', tag: 'Direct CDN MP4 (Audio+Video)' },
+  { label: 'X (Twitter)', tag: 'Multi-bitrate MP4 variants' },
+  { label: 'TikTok', tag: 'No-watermark HD MP4' },
+  { label: 'Facebook', tag: 'Isolated HD/SD MP4' },
+  { label: 'LinkedIn', tag: 'Login-free dms.licdn MP4' },
+  { label: 'Threads', tag: 'Login-free MP4 & Embed' },
+  { label: 'Vimeo', tag: 'HLS-to-MP4 + DNT Player' },
+  { label: 'Reddit', tag: 'v.redd.it MP4 + HLS' },
   { label: 'Dailymotion', tag: 'Pre-roll ad bypass' },
-  { label: 'Archive.org', tag: 'Direct MP4 cache' },
-  { label: 'Streamable', tag: 'Direct MP4 variants' },
-  { label: 'HLS .m3u8', tag: 'Adaptive stream' },
-  { label: 'General Web Video', tag: 'HTML5 / OG extractor' },
+  { label: 'Archive.org', tag: 'Direct MP4 Vault Cache' },
+  { label: 'External Websites', tag: 'TED / HTML5 / Player Config MP4' },
 ];
 
 const DEFENSE_ITEMS = [

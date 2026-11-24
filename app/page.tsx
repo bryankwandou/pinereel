@@ -7,11 +7,14 @@ import { useApp } from '@/components/AppProvider';
 import { InteractiveMotionDeck } from '@/components/InteractiveMotionDeck';
 import {
   CountUpMetric,
+  KineticBeamDivider,
   KineticLine,
   LiveSourceFlipper,
   Magnetic,
   PerspectiveTiltCard,
   ScrollRise,
+  StaggerGroup,
+  StaggerItem,
   StrikeThroughSweep,
   useSafeReducedMotion,
 } from '@/components/MotionKit';
@@ -24,39 +27,46 @@ import { VideoWorkbench } from '@/components/VideoWorkbench';
 
 const SOURCE_MATRIX = [
   {
-    platform: 'Direct MP4 / WebM / HLS',
-    cloud: 'Native stream + HTTPS proxy',
-    local: 'Native stream + proxy',
-    offline: 'IndexedDB Vault + MP4',
-    shield: 'SSRF + MIME + SHA-256',
-  },
-  {
-    platform: 'Archive.org / Open Media',
-    cloud: 'JSON metadata + MP4',
-    local: 'JSON metadata + MP4',
-    offline: 'IndexedDB Vault + MP4',
-    shield: 'SSRF + Host screening',
-  },
-  {
-    platform: 'X (Twitter) / Reddit',
-    cloud: 'Syndication / JSON MP4 + HLS',
-    local: 'yt-dlp + MP4 variants',
-    offline: 'IndexedDB Vault + MP4',
-    shield: 'Sensitivity + Tracker strip',
-  },
-  {
-    platform: 'YouTube / Vimeo / Dailymotion',
-    cloud: 'Isolated nocookie / DNT',
+    platform: 'YouTube (4K / Shorts)',
+    cloud: 'InnerTube ANDROID + Piped MP4',
     local: 'yt-dlp + ffmpeg MP4 merge',
-    offline: 'Local yt-dlp -> Vault',
-    shield: 'isFamilySafe + Age check',
+    offline: 'Direct MP4 + IndexedDB Vault',
+    shield: 'Ad-wrapper & tracker strip',
   },
   {
-    platform: 'Instagram / TikTok / General Web',
-    cloud: 'Outlink unwrap + OG/HTML5 video',
+    platform: 'Instagram Reels & Video',
+    cloud: 'CDN MP4 (Audio+Video) + Embed',
+    local: 'yt-dlp + MP4 variants',
+    offline: 'Direct MP4 + IndexedDB Vault',
+    shield: 'Outlink unwrap + tracker strip',
+  },
+  {
+    platform: 'X (Twitter) / TikTok / Reddit',
+    cloud: 'Syndication / vx / TikWM / JSON MP4',
+    local: 'yt-dlp + MP4 variants',
+    offline: 'Direct MP4 + IndexedDB Vault',
+    shield: 'No-login + zero promoted ads',
+  },
+  {
+    platform: 'Facebook / LinkedIn / Threads',
+    cloud: 'Video Plugins / dms.licdn / Embed MP4',
+    local: 'yt-dlp + MP4 variants',
+    offline: 'Direct MP4 + IndexedDB Vault',
+    shield: 'Login-free + authwall bypass',
+  },
+  {
+    platform: 'Vimeo / Dailymotion / Archive / Streamable',
+    cloud: 'Player Config HLS->MP4 + Direct MP4',
+    local: 'yt-dlp + ffmpeg MP4 merge',
+    offline: 'Direct MP4 / HLS Video Download',
+    shield: 'Pre-roll ad bypass + DNT',
+  },
+  {
+    platform: 'External Websites (TED / HTML5 / Blogs)',
+    cloud: 'Player Config + OG + Embedded MP4',
     local: 'yt-dlp full extraction',
-    offline: 'Direct / yt-dlp -> Vault',
-    shield: '5-hop ad & binary block only',
+    offline: 'Direct MP4 + Ad-Stripped Proxy',
+    shield: 'Preview/loop filter + SSRF guard',
   },
 ];
 
@@ -122,9 +132,9 @@ export default function HomePage() {
               style={{ ['--pr-i' as string]: 4 }}
             >
               <div>
-                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">Shield Gates</dt>
+                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">GPU Shield Nodes</dt>
                 <dd className="text-2xl font-semibold text-[var(--pr-ink)] m-0 mt-0.5">
-                  <CountUpMetric value={5} />
+                  <CountUpMetric value={1024} />
                 </dd>
               </div>
               <div>
@@ -134,9 +144,9 @@ export default function HomePage() {
                 </dd>
               </div>
               <div>
-                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">Source Engines</dt>
+                <dt className="text-[11px] pr-mono text-[var(--pr-ink-3)] uppercase">MP4 Extractors</dt>
                 <dd className="text-2xl font-semibold text-[var(--pr-ink)] m-0 mt-0.5">
-                  <CountUpMetric value={9} suffix="+" />
+                  <CountUpMetric value={12} suffix="+" />
                 </dd>
               </div>
               <div>
@@ -232,30 +242,37 @@ export default function HomePage() {
 
       {/* Architecture Overview */}
       <section className="pr-wrap pt-16 sm:pt-20 space-y-6">
-        <div className="border-t border-[var(--pr-rule)] pt-10 space-y-2">
+        <KineticBeamDivider />
+        <div className="pt-8 space-y-2">
           <span className="pr-kicker">{t('how.kicker')}</span>
           <h2 className="pr-h2 max-w-2xl">{t('how.title')}</h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <article className="pr-card p-6 space-y-2.5">
-            <Shield size={18} className="text-[var(--pr-signal)]" aria-hidden="true" />
-            <h3 className="pr-h3">{t('how.step1Title')}</h3>
-            <p className="text-sm text-[var(--pr-ink-2)] m-0">{t('how.step1Body')}</p>
-          </article>
+        <StaggerGroup className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <StaggerItem>
+            <article className="pr-card pr-card--interactive p-6 space-y-2.5 h-full">
+              <Shield size={18} className="text-[var(--pr-signal)]" aria-hidden="true" />
+              <h3 className="pr-h3">{t('how.step1Title')}</h3>
+              <p className="text-sm text-[var(--pr-ink-2)] m-0">{t('how.step1Body')}</p>
+            </article>
+          </StaggerItem>
 
-          <article className="pr-card p-6 space-y-2.5">
-            <Terminal size={18} className="text-[var(--pr-signal)]" aria-hidden="true" />
-            <h3 className="pr-h3">{t('how.step2Title')}</h3>
-            <p className="text-sm text-[var(--pr-ink-2)] m-0">{t('how.step2Body')}</p>
-          </article>
+          <StaggerItem>
+            <article className="pr-card pr-card--interactive p-6 space-y-2.5 h-full">
+              <Terminal size={18} className="text-[var(--pr-signal)]" aria-hidden="true" />
+              <h3 className="pr-h3">{t('how.step2Title')}</h3>
+              <p className="text-sm text-[var(--pr-ink-2)] m-0">{t('how.step2Body')}</p>
+            </article>
+          </StaggerItem>
 
-          <article className="pr-card p-6 space-y-2.5">
-            <HardDrive size={18} className="text-[var(--pr-signal)]" aria-hidden="true" />
-            <h3 className="pr-h3">{t('how.step3Title')}</h3>
-            <p className="text-sm text-[var(--pr-ink-2)] m-0">{t('how.step3Body')}</p>
-          </article>
-        </div>
+          <StaggerItem>
+            <article className="pr-card pr-card--interactive p-6 space-y-2.5 h-full">
+              <HardDrive size={18} className="text-[var(--pr-signal)]" aria-hidden="true" />
+              <h3 className="pr-h3">{t('how.step3Title')}</h3>
+              <p className="text-sm text-[var(--pr-ink-2)] m-0">{t('how.step3Body')}</p>
+            </article>
+          </StaggerItem>
+        </StaggerGroup>
       </section>
 
       {/* Source Capability Comparison Table */}

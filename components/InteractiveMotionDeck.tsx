@@ -63,20 +63,20 @@ const LIVE_PACKETS = [
 
 const QUICK_LAUNCH_SOURCES = [
   {
-    label: 'YouTube 4K',
+    label: 'YouTube 4K MP4',
     url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ&utm_source=ad&fbclid=track',
   },
   {
-    label: 'Sonacast Web App',
-    url: 'https://sonacast-ten.vercel.app/favorites',
+    label: 'Instagram Reel MP4',
+    url: 'https://www.instagram.com/reel/Df7ICLZNPyp/',
   },
   {
-    label: 'Ad-Wrapped Video',
-    url: 'https://ads.doubleclick.net/clk?adurl=https://www.youtube.com/watch?v=aqz-KE-bpKQ',
+    label: 'X Video MP4',
+    url: 'https://x.com/OpenAI/status/1758192957386342435',
   },
   {
-    label: 'Direct MP4 (Vault)',
-    url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    label: 'TED External MP4',
+    url: 'https://www.ted.com/talks/sir_ken_robinson_do_schools_kill_creativity',
   },
   {
     label: 'TikTok Clean MP4',
@@ -351,14 +351,14 @@ export function InteractiveMotionDeck({
               </span>
             </div>
 
-            <div className="h-16 flex items-end gap-1 pt-2" aria-hidden="true">
-              {Array.from({ length: 24 }).map((_, idx) => {
-                const h = 18 + Math.round(((Math.sin(idx * 0.65 + packetTick) + 1) * 0.5) * (dial * 0.42));
+            <div className="h-16 flex items-end gap-[3px] pt-2" aria-hidden="true">
+              {Array.from({ length: 40 }).map((_, idx) => {
+                const h = 14 + Math.round(((Math.sin(idx * 0.48 + packetTick * 0.9) + 1) * 0.5) * (dial * 0.46));
                 return (
                   <motion.span
                     key={idx}
-                    animate={{ height: `${Math.min(60, Math.max(10, h))}px` }}
-                    transition={reduce ? { duration: 0.01 } : { duration: 0.45, ease: 'easeInOut' }}
+                    animate={{ height: `${Math.min(60, Math.max(8, h))}px` }}
+                    transition={reduce ? { duration: 0.01 } : { duration: 0.42, ease: 'easeInOut' }}
                     className="flex-1 rounded-t-sm"
                     style={{
                       background: idx % 3 === 0 ? '#5fe09e' : '#33c288',

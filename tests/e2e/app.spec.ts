@@ -119,14 +119,28 @@ test.describe('PineReel Core E2E', () => {
     expect(ttBody.ok).toBe(true);
     expect(ttBody.safety.verdict).toBe('SAFE');
 
-    // Instagram Reel resolution
+    // Instagram Reel resolution + real downloadable MP4 stream verification
     const igRes = await request.post('/api/resolve', {
-      data: { url: 'https://www.instagram.com/reel/C8x1234abcd/?igsh=track' },
+      data: { url: 'https://www.instagram.com/reel/Df7ICLZNPyp/?igsh=track' },
     });
     expect(igRes.status()).toBe(200);
     const igBody = await igRes.json();
     expect(igBody.ok).toBe(true);
     expect(igBody.safety.verdict).toBe('SAFE');
+    expect(igBody.streams.length).toBeGreaterThan(0);
+
+    // YouTube direct MP4 stream verification (via InnerTube ANDROID / Piped)
+    expect(safeBody.streams.length).toBeGreaterThan(0);
+
+    // External publisher website (TED) direct MP4 stream verification
+    const tedRes = await request.post('/api/resolve', {
+      data: { url: 'https://www.ted.com/talks/sir_ken_robinson_do_schools_kill_creativity' },
+    });
+    expect(tedRes.status()).toBe(200);
+    const tedBody = await tedRes.json();
+    expect(tedBody.ok).toBe(true);
+    expect(tedBody.safety.verdict).toBe('SAFE');
+    expect(tedBody.streams.length).toBeGreaterThan(0);
 
     // Standalone ad malware APK remains blocked
     const badRes = await request.post('/api/resolve', {
